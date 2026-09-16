@@ -3,6 +3,7 @@ import { tomtomProxy } from './traffic.js';
 import { firmsProxy } from './firms.js';
 import { gbfsProxy } from './gbfs.js';
 import { celestrakProxy, rocketLaunchesProxy } from './space.js';
+import { coquitlamParkingProxy } from './coquitlamParking.js';
 export { LL2_CACHE_TTL_MS, launchLibraryRequestHeaders } from './space.js';
 /**
  * Local Node provider middleware for God's Eye View.
@@ -3151,7 +3152,7 @@ const GEV_REALTIME_TOOLS = [
         layerId: {
           type: 'string',
           description:
-            'Common-name mapping for the non-obvious ids: space mission(s) → rocket-launches; fires/wildfires/active fires → local-firms (NASA FIRMS); ships/vessels/boats → ais-live-vessels; undersea/submarine cables → telegeography-submarine-cables; datacenters → local-datacenters; dams → local-dams; bikes/bike share → bikeshare; street traffic/congestion → traffic; traffic cameras → cctv; internet radio/stations → radio.',
+            'Common-name mapping for the non-obvious ids: space mission(s) → rocket-launches; fires/wildfires/active fires → local-firms (NASA FIRMS); ships/vessels/boats → ais-live-vessels; undersea/submarine cables → telegeography-submarine-cables; datacenters → local-datacenters; dams → local-dams; bikes/bike share → bikeshare; street traffic/congestion → traffic; traffic cameras → cctv; internet radio/stations → radio; parking/parking lots/Coquitlam parking/Town Centre Park parking → coquitlam-parking.',
           enum: [
             'flights',
             'military',
@@ -3162,6 +3163,7 @@ const GEV_REALTIME_TOOLS = [
             'cctv',
             'radio',
             'bikeshare',
+            'coquitlam-parking',
             'ais-live-vessels',
             'local-datacenters',
             'local-dams',
@@ -3193,6 +3195,7 @@ const GEV_REALTIME_TOOLS = [
             'cctv',
             'radio',
             'bikeshare',
+            'coquitlam-parking',
             'ais-live-vessels',
             'local-datacenters',
             'local-dams',
@@ -4661,6 +4664,7 @@ export function localProviderPlugins() {
       cctvProxy(),
       radioBrowserProxy(),
       gbfsProxy(),
+      coquitlamParkingProxy(),
       adsbLolProxy(),
       aisLiveProxy(),
       trackBackfillProxies(),

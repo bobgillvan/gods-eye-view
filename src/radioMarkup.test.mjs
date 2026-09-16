@@ -166,6 +166,12 @@ test('no unchanged Realtime tool definition drifts silently', () => {
   // If this fails and the change was deliberate, re-derive the digest and say
   // in the mic-test brief which tools moved — the session cache busts on any
   // schema change.
+  //
+  // Re-pinned 2026-09-16 for the local coquitlam-parking layer, which adds its
+  // id to `set_layer_visibility` and `show_data_layers_menu` and names itself
+  // in the common-name mapping. Verified as the SOLE cause: stripping just the
+  // coquitlam-parking enum entries and that mapping clause from this set
+  // reproduces the previous digest 802ed694b8887b88 exactly.
   const TOUCHED = new Set([
     'set_context_mode',
     'control_cockpit',
@@ -183,7 +189,7 @@ test('no unchanged Realtime tool definition drifts silently', () => {
     .update(JSON.stringify(unchanged))
     .digest('hex')
     .slice(0, 16);
-  assert.equal(digest, '802ed694b8887b88', 'an unchanged Realtime tool definition drifted');
+  assert.equal(digest, 'cc749cfb23b9e4ba', 'an unchanged Realtime tool definition drifted');
 });
 
 test('Radio volume and mission speed share the Sharpen slider visual language', () => {

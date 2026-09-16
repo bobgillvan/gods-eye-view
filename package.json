@@ -36,6 +36,7 @@
     "format": "node scripts/format.mjs --write",
     "format:check": "node scripts/format.mjs --check",
     "dev": "vite",
+    "dev:pnw": "bash scripts/dev-pnw.sh",
     "dev:secure": "./scripts/dev-secure.sh",
     "opensky:import": "./scripts/opensky-import-client.sh",
     "build": "vite build",

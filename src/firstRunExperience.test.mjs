@@ -659,10 +659,16 @@ test('the voice TOOL SCHEMA is byte-identical to main — the mission mapping is
   // exactly the kind of schema change this pin exists to make loud). The
   // guarded claim is unchanged: first-run missions ride existing tools, and
   // any NEW drift from this recorded schema still fails here.
-  assert.equal(block.length, 31189, 'tool schema byte length drifted from the pinned release schema');
+  //
+  // Re-pinned 2026-09-16: the local coquitlam-parking layer DELIBERATELY joins
+  // the set_layer_visibility and layerId enums so the lots are reachable by
+  // voice, plus the common-name mapping line that makes "parking" resolve to
+  // it. +151 bytes. Same guarded claim: this is a reviewed schema edit, and
+  // any further drift still fails here.
+  assert.equal(block.length, 31340, 'tool schema byte length drifted from the pinned release schema');
   assert.equal(
     crypto.createHash('sha256').update(block).digest('hex'),
-    '73aaabdb169a5478893d28688f327a21edd32ed3ec16fc6287bd944ed77beecf',
+    'af3b11f4512f865074ca2ec78f59d4c0c84bde7012ce756886b3dfa592a5c073',
     'the first-run missions must ride EXISTING tools: no schema edit, no cache bust',
   );
 
