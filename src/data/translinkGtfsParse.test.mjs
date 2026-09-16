@@ -223,3 +223,93 @@ test('a trip referencing a missing route still draws, with empty names', () => {
   assert.equal(routes[0].shortName, '');
   assert.equal(routes[0].kind, 'other');
 });
+
+// ── GTFS-realtime protobuf ──────────────────────────────────────────────────
+// parseVehiclePositions lives in the server provider (it works on Buffers, not
+// browser data), but it is pure and its failure mode is silent: a wrong field
+// number yields an empty vehicle list, which is indistinguishable from "no
+// buses are running". These build a FeedMessage by hand so the wire format is
+// pinned without a live key.
+
+/** Minimal protobuf writers, enough to synthesise a FeedMessage. */
+function pbVarint(n) {
+  const out = [];
+  while (n > 127) {
+    out.push((n & 127) | 128);
+    n >>>= 7;
+  }
+  out.push(n);
+  return Buffer.from(out);
+}
+function pbTag(field, wire) {
+  return pbVarint((field << 3) | wire);
+}
+function pbLen(buf) {
+  return Buffer.concat([pbVarint(buf.length), buf]);
+}
+function pbFloat(value) {
+  const b = Buffer.alloc(4);
+  b.writeFloatLE(value);
+  return b;
+}
+
+/**
+ * Build one FeedEntity carrying a VehiclePosition.
+ *
+ * @param {object} spec
+ * @returns {Buffer}
+ */
+function feedWith({ id = 'v1', routeId = 'R1', lat = 49.28, lon = -122.79, bearing }) {
+  const positionParts = [pbTag(1, 5), pbFloat(lat), pbTag(2, 5), pbFloat(lon)];
+  if (bearing !== undefined) positionParts.push(pbTag(3, 5), pbFloat(bearing));
+  const position = Buffer.concat(positionParts);
+  const trip = Buffer.concat([pbTag(5, 2), pbLen(Buffer.from(routeId, 'utf8'))]);
+  const vehicle = Buffer.concat([pbTag(1, 2), pbLen(trip), pbTag(2, 2), pbLen(position)]);
+  const entity = Buffer.concat([
+    pbTag(1, 2),
+    pbLen(Buffer.from(id, 'utf8')),
+    pbTag(4, 2),
+    pbLen(vehicle),
+  ]);
+  return Buffer.concat([pbTag(2, 2), pbLen(entity)]);
+}
+
+test('a vehicle position round-trips out of the protobuf wire format', async () => {
+  const { parseVehiclePositions } = await import('../../server/providers/translink.js');
+  const [vehicle] = parseVehiclePositions(feedWith({ id: 'bus-1', routeId: 'R42', bearing: 137.5 }));
+  assert.equal(vehicle.id, 'bus-1');
+  assert.equal(vehicle.routeId, 'R42');
+  assert.ok(Math.abs(vehicle.lat - 49.28) < 0.001);
+  assert.ok(Math.abs(vehicle.lon - -122.79) < 0.001);
+  assert.ok(Math.abs(vehicle.bearing - 137.5) < 0.01);
+});
+
+test('an absent bearing reads as null rather than 0 — TransLink omits it entirely', () => {
+  // Verified against the live feed 2026-09-16: 0 of 129 vehicles carried a
+  // bearing. A parser that defaulted to 0 would point every bus due north.
+  return import('../../server/providers/translink.js').then(({ parseVehiclePositions }) => {
+    const [vehicle] = parseVehiclePositions(feedWith({ bearing: undefined }));
+    assert.equal(vehicle.bearing, null);
+    assert.ok(Number.isFinite(vehicle.lat), 'position still parses without a bearing');
+  });
+});
+
+test('malformed protobuf yields no vehicles instead of throwing', async () => {
+  const { parseVehiclePositions } = await import('../../server/providers/translink.js');
+  assert.deepEqual(parseVehiclePositions(Buffer.alloc(0)), []);
+  assert.deepEqual(parseVehiclePositions(Buffer.from([0xff, 0xff, 0xff])), []);
+});
+
+test('several vehicles in one feed all parse', async () => {
+  const { parseVehiclePositions } = await import('../../server/providers/translink.js');
+  const feed = Buffer.concat([
+    feedWith({ id: 'a', routeId: 'R1', lat: 49.25, lon: -122.8 }),
+    feedWith({ id: 'b', routeId: 'R2', lat: 49.3, lon: -122.85 }),
+  ]);
+  const vehicles = parseVehiclePositions(feed);
+  assert.equal(vehicles.length, 2);
+  assert.deepEqual(
+    vehicles.map((v) => v.routeId),
+    ['R1', 'R2'],
+  );
+});
