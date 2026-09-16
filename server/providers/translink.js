@@ -308,30 +308,73 @@ export function parseVehiclePositions(buf) {
     if (vehicleStart < 0) return;
 
     let routeId = null;
+    let tripId = null;
+    let startDate = null;
     let lat = null;
     let lon = null;
     let bearing = null;
-    // VehiclePosition: trip = 1, position = 2
-    walk(b, vehicleStart, vehicleEnd, (f3, w3, b3, s3, e3) => {
+    let stopSequence = null;
+    let timestamp = null;
+    let stopId = null;
+    let vehicleLabel = null;
+
+    // Field numbers below were decoded EMPIRICALLY from the live feed
+    // (2026-09-16) by dumping every field with its wire type and reading the
+    // shapes, not from the GTFS-realtime spec numbering — TransLink's layout
+    // does not match it. Two guesses at the canonical numbering both produced
+    // confident nonsense (a date parsed as direction_id, a timestamp parsed as
+    // congestion_level), so the evidence wins:
+    //
+    //   1 trip { 1 trip_id, 3 start_date, 5 route_id }
+    //   2 position { 1 lat, 2 lon }   3 stop_sequence   5 timestamp
+    //   7 stop_id                     8 vehicle { 1 id, 2 label }
+    walk(b, vehicleStart, vehicleEnd, (f3, w3, b3, s3, e3, v3) => {
       if (f3 === 1 && w3 === 2) {
-        // TripDescriptor: route_id = 5
         walk(b3, s3, e3, (f4, w4, b4, s4, e4) => {
-          if (f4 === 5 && w4 === 2) routeId = b4.toString('utf8', s4, e4);
+          if (w4 !== 2) return;
+          if (f4 === 1) tripId = b4.toString('utf8', s4, e4);
+          if (f4 === 3) startDate = b4.toString('utf8', s4, e4);
+          if (f4 === 5) routeId = b4.toString('utf8', s4, e4);
         });
-      }
-      if (f3 === 2 && w3 === 2) {
-        // Position: latitude = 1 (float), longitude = 2 (float), bearing = 3 (float)
+      } else if (f3 === 2 && w3 === 2) {
         walk(b3, s3, e3, (f4, w4, b4, s4) => {
           if (w4 !== 5) return;
           if (f4 === 1) lat = b4.readFloatLE(s4);
           if (f4 === 2) lon = b4.readFloatLE(s4);
           if (f4 === 3) bearing = b4.readFloatLE(s4);
         });
+      } else if (f3 === 3 && w3 === 0) {
+        stopSequence = v3;
+      } else if (f3 === 5 && w3 === 0) {
+        timestamp = v3;
+      } else if (f3 === 7 && w3 === 2) {
+        stopId = b3.toString('utf8', s3, e3);
+      } else if (f3 === 8 && w3 === 2) {
+        // VehicleDescriptor: id and label are the same fleet number here, but
+        // label is what a rider sees on the bus, so it wins when they differ.
+        walk(b3, s3, e3, (f4, w4, b4, s4, e4) => {
+          if (w4 !== 2) return;
+          if (f4 === 2) vehicleLabel = b4.toString('utf8', s4, e4);
+          else if (f4 === 1 && !vehicleLabel) vehicleLabel = b4.toString('utf8', s4, e4);
+        });
       }
     });
 
     if (Number.isFinite(lat) && Number.isFinite(lon)) {
-      vehicles.push({ id, routeId, lat, lon, bearing: Number.isFinite(bearing) ? bearing : null });
+      vehicles.push({
+        id,
+        routeId,
+        tripId,
+        startDate,
+        lat,
+        lon,
+        bearing: Number.isFinite(bearing) ? bearing : null,
+        stopSequence,
+        // Seconds since epoch upstream; milliseconds is what JS dates expect.
+        timestamp: Number.isFinite(timestamp) ? timestamp * 1000 : null,
+        stopId,
+        vehicleLabel,
+      });
     }
   });
 
@@ -396,6 +439,20 @@ export function translinkProxy() {
         }
 
         try {
+          // Warm the static network first so ids can be resolved to names. It
+          // is cached for a day, so this costs nothing after the first call;
+          // a failure here must not block vehicles, which are the live part.
+          if (!_networkCache) {
+            try {
+              await loadNetwork();
+            } catch (networkError) {
+              console.warn(
+                '[TransLink] network unavailable for vehicle enrichment:',
+                String(networkError?.message || networkError),
+              );
+            }
+          }
+
           const url = `${GTFS_REALTIME_POSITIONS}?apikey=${encodeURIComponent(apiKey)}`;
           const response = await fetchBounded(url, REALTIME_FETCH_TIMEOUT_MS);
           if (response.status === 403 || response.status === 401) {
@@ -416,11 +473,38 @@ export function translinkProxy() {
               v.lon >= bbox.minLon &&
               v.lon <= bbox.maxLon,
           );
+          // Resolve ids to names using the static network already in cache.
+          // "Route 6626, stop 21" tells a rider nothing; "145 SFU/Production
+          // Station, next stop Barnet Hwy @ Cameron St" tells them everything.
+          // Enrichment is best-effort: the network cache may be cold on the
+          // first vehicles call, and a vehicle with unresolved names is still
+          // worth drawing.
+          const routeNames = new Map();
+          const stopNames = new Map();
+          if (_networkCache) {
+            for (const route of _networkCache.routes || []) {
+              routeNames.set(route.routeId, {
+                label: [route.shortName, route.longName].filter(Boolean).join(' ').trim(),
+                kind: route.kind,
+                color: route.color,
+              });
+            }
+            for (const stop of _networkCache.stops || []) stopNames.set(stop.stopId, stop.name);
+          }
+          for (const vehicle of vehicles) {
+            const route = routeNames.get(vehicle.routeId);
+            vehicle.routeLabel = route?.label || null;
+            vehicle.kind = route?.kind || null;
+            vehicle.color = route?.color || null;
+            vehicle.stopName = vehicle.stopId ? stopNames.get(vehicle.stopId) || null : null;
+          }
+
           const payload = {
             configured: true,
             generatedAt: new Date().toISOString(),
             attribution: 'TransLink',
             systemCount: all.length,
+            enriched: _networkCache != null,
             vehicles,
           };
           _vehiclesCache = payload;

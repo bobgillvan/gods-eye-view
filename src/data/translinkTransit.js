@@ -1,4 +1,15 @@
 import * as Cesium from 'cesium';
+import {
+  resolvePickId,
+  registerPickOwner,
+  unregisterPickOwner,
+  isOwnedByOtherLayer,
+} from './pickRegistry.js';
+import {
+  showVehicleCard,
+  hideVehicleCard,
+  destroyVehicleCard,
+} from './translinkVehicleCard.js';
 
 /**
  * TransLink transit — route lines, stations, and live vehicles.
@@ -64,6 +75,49 @@ export function routeLabel(route) {
 }
 
 /**
+ * Human summary of one vehicle, as shown on the click card and copied to the
+ * clipboard. Every field is optional: TransLink omits bearing entirely, and a
+ * vehicle on a route outside the static slice has no resolved name.
+ *
+ * @param {object} vehicle Vehicle record from /api/translink/vehicles.
+ * @returns {Array<[string, string]>} Label/value pairs, skipping absent data.
+ */
+export function vehicleDetailRows(vehicle) {
+  const rows = [];
+  if (vehicle?.routeLabel) rows.push(['Route', vehicle.routeLabel]);
+  else if (vehicle?.routeId) rows.push(['Route id', String(vehicle.routeId)]);
+  if (vehicle?.vehicleLabel) rows.push(['Vehicle', `#${vehicle.vehicleLabel}`]);
+  if (vehicle?.stopName) rows.push(['Next stop', vehicle.stopName]);
+  else if (vehicle?.stopId) rows.push(['Next stop id', String(vehicle.stopId)]);
+  if (Number.isFinite(vehicle?.stopSequence)) rows.push(['Stop #', String(vehicle.stopSequence)]);
+  if (Number.isFinite(vehicle?.lat) && Number.isFinite(vehicle?.lon)) {
+    rows.push(['Position', `${vehicle.lat.toFixed(5)}, ${vehicle.lon.toFixed(5)}`]);
+  }
+  if (Number.isFinite(vehicle?.timestamp)) {
+    const age = Math.max(0, Math.round((Date.now() - vehicle.timestamp) / 1000));
+    rows.push(['Reported', age < 90 ? `${age}s ago` : new Date(vehicle.timestamp).toLocaleTimeString()]);
+  }
+  if (vehicle?.tripId) rows.push(['Trip', String(vehicle.tripId)]);
+  return rows;
+}
+
+/**
+ * One-line plain-text form of a vehicle, for sharing.
+ *
+ * @param {object} vehicle
+ * @returns {string}
+ */
+export function vehicleShareText(vehicle) {
+  const rows = vehicleDetailRows(vehicle);
+  const head = vehicle?.routeLabel || `Route ${vehicle?.routeId || '?'}`;
+  const body = rows
+    .filter(([label]) => label !== 'Route')
+    .map(([label, value]) => `${label}: ${value}`)
+    .join(' | ');
+  return `TransLink ${head}${body ? ` — ${body}` : ''}`;
+}
+
+/**
  * Create the TransLink transit layer.
  *
  * @returns {object} Layer conforming to the host's data-layer contract.
@@ -81,6 +135,10 @@ export function createTranslinkTransitLayer() {
   let _lastError = null;
   /** routeId -> colour, so a vehicle can be painted like the line it runs on. */
   const _routeColors = new Map();
+  /** entity id -> the vehicle record behind it, for click inspection. */
+  const _vehicleRecords = new Map();
+  let _clickHandler = null;
+  let _selectedId = null;
 
   /**
    * Draw the static network once per network refresh.
@@ -175,11 +233,14 @@ export function createTranslinkTransitLayer() {
     _keyed = true;
     const vehicles = Array.isArray(payload?.vehicles) ? payload.vehicles : [];
     _vehicleSource.entities.removeAll();
+    _vehicleRecords.clear();
     for (const vehicle of vehicles) {
       if (!Number.isFinite(vehicle.lat) || !Number.isFinite(vehicle.lon)) continue;
       const color = _routeColors.get(vehicle.routeId) || Cesium.Color.WHITE;
+      const entityId = `translink-vehicle-${vehicle.id || `${vehicle.lat},${vehicle.lon}`}`;
+      _vehicleRecords.set(entityId, vehicle);
       _vehicleSource.entities.add({
-        id: `translink-vehicle-${vehicle.id || `${vehicle.lat},${vehicle.lon}`}`,
+        id: entityId,
         position: Cesium.Cartesian3.fromDegrees(vehicle.lon, vehicle.lat),
         // A vehicle must not look like a stop. Stops are 4-8 px and dim; a
         // vehicle is larger, ringed in white and drawn at full brightness, so
@@ -202,6 +263,17 @@ export function createTranslinkTransitLayer() {
       });
     }
     _vehicleCount = vehicles.length;
+
+    // The open card must follow its bus. Re-render it from the new record, or
+    // close it when that vehicle has left the feed — a card frozen on a stale
+    // position is worse than no card.
+    if (_selectedId) {
+      const fresh = _vehicleRecords.get(_selectedId);
+      if (!fresh) {
+        _selectedId = null;
+        hideVehicleCard();
+      }
+    }
   }
 
   return {
@@ -218,6 +290,37 @@ export function createTranslinkTransitLayer() {
       _vehicleSource.show = false;
       viewer.dataSources.add(_dataSource);
       viewer.dataSources.add(_vehicleSource);
+
+      // Claim our own entity ids so a sibling layer's click handler leaves
+      // them alone, and vice versa — every layer here picks from one scene.
+      registerPickOwner('translink-transit', (id) => String(id).startsWith('translink-vehicle-'));
+
+      if (typeof Cesium.ScreenSpaceEventHandler === 'function' && viewer.scene?.canvas) {
+        _clickHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+        _clickHandler.setInputAction((click) => {
+          const picked = viewer.scene.pick(click.position);
+          const pickedId = resolvePickId(picked);
+          // Another layer owns this pick; do not compete for it.
+          if (pickedId && isOwnedByOtherLayer('translink-transit', pickedId)) return;
+          const record = pickedId ? _vehicleRecords.get(pickedId) : null;
+          if (record) {
+            _selectedId = pickedId;
+            showVehicleCard({
+              rows: vehicleDetailRows(record),
+              shareText: vehicleShareText(record),
+              accent: record.color || '#00e0ff',
+              at: { x: click.position?.x ?? 0, y: click.position?.y ?? 0 },
+              onClose: () => {
+                _selectedId = null;
+              },
+            });
+          } else if (_selectedId) {
+            // A click on empty space dismisses, matching every sibling layer.
+            _selectedId = null;
+            hideVehicleCard();
+          }
+        }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+      }
       _networkLoadedAt = 0;
       _routeCount = 0;
       _stopCount = 0;
@@ -236,6 +339,9 @@ export function createTranslinkTransitLayer() {
     disable() {
       if (_dataSource) _dataSource.show = false;
       if (_vehicleSource) _vehicleSource.show = false;
+      // A card left open over a hidden layer points at nothing.
+      _selectedId = null;
+      hideVehicleCard();
     },
 
     async update() {
@@ -263,6 +369,12 @@ export function createTranslinkTransitLayer() {
     },
 
     destroy(viewer) {
+      _clickHandler?.destroy?.();
+      _clickHandler = null;
+      unregisterPickOwner('translink-transit');
+      destroyVehicleCard();
+      _vehicleRecords.clear();
+      _selectedId = null;
       for (const source of [_dataSource, _vehicleSource]) {
         if (!source) continue;
         try {
