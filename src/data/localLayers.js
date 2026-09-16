@@ -3,6 +3,9 @@ import { createInfrastructureLayers } from './infrastructure.js';
 import { createFirmsHeatmapLayer } from './firmsHeatmap.js';
 import submarineCablesLayer from './telegeographySubmarineCables.js';
 import coquitlamParkingLayer from './coquitlamParking.js';
+import coquitlamTrailsLayer from './coquitlamTrails.js';
+import coquitlamCrimeLayer from './coquitlamCrime.js';
+import translinkTransitLayer from './translinkTransit.js';
 
 const [datacenters, dams] = createInfrastructureLayers(localGeoJsonServices);
 
@@ -22,4 +25,7 @@ export default [
   submarineCablesLayer,
   fires,
   coquitlamParkingLayer,
+  coquitlamTrailsLayer,
+  coquitlamCrimeLayer,
+  translinkTransitLayer,
 ];

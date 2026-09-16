@@ -4,6 +4,8 @@ import { firmsProxy } from './firms.js';
 import { gbfsProxy } from './gbfs.js';
 import { celestrakProxy, rocketLaunchesProxy } from './space.js';
 import { coquitlamParkingProxy } from './coquitlamParking.js';
+import { coquitlamCivicProxy } from './coquitlamCivic.js';
+import { translinkProxy } from './translink.js';
 export { LL2_CACHE_TTL_MS, launchLibraryRequestHeaders } from './space.js';
 /**
  * Local Node provider middleware for God's Eye View.
@@ -3152,7 +3154,7 @@ const GEV_REALTIME_TOOLS = [
         layerId: {
           type: 'string',
           description:
-            'Common-name mapping for the non-obvious ids: space mission(s) → rocket-launches; fires/wildfires/active fires → local-firms (NASA FIRMS); ships/vessels/boats → ais-live-vessels; undersea/submarine cables → telegeography-submarine-cables; datacenters → local-datacenters; dams → local-dams; bikes/bike share → bikeshare; street traffic/congestion → traffic; traffic cameras → cctv; internet radio/stations → radio; parking/parking lots/Coquitlam parking/Town Centre Park parking → coquitlam-parking.',
+            'Common-name mapping for the non-obvious ids: space mission(s) → rocket-launches; fires/wildfires/active fires → local-firms (NASA FIRMS); ships/vessels/boats → ais-live-vessels; undersea/submarine cables → telegeography-submarine-cables; datacenters → local-datacenters; dams → local-dams; bikes/bike share → bikeshare; street traffic/congestion → traffic; traffic cameras → cctv; internet radio/stations → radio; parking/parking lots/Coquitlam parking/Town Centre Park parking → coquitlam-parking; trails/hiking trails/paths → coquitlam-trails; crime/property crime/break-ins/theft → coquitlam-crime; transit/buses/SkyTrain/TransLink/bus routes → translink-transit.',
           enum: [
             'flights',
             'military',
@@ -3164,6 +3166,9 @@ const GEV_REALTIME_TOOLS = [
             'radio',
             'bikeshare',
             'coquitlam-parking',
+            'coquitlam-trails',
+            'coquitlam-crime',
+            'translink-transit',
             'ais-live-vessels',
             'local-datacenters',
             'local-dams',
@@ -3196,6 +3201,9 @@ const GEV_REALTIME_TOOLS = [
             'radio',
             'bikeshare',
             'coquitlam-parking',
+            'coquitlam-trails',
+            'coquitlam-crime',
+            'translink-transit',
             'ais-live-vessels',
             'local-datacenters',
             'local-dams',
@@ -4665,6 +4673,8 @@ export function localProviderPlugins() {
       radioBrowserProxy(),
       gbfsProxy(),
       coquitlamParkingProxy(),
+      coquitlamCivicProxy(),
+      translinkProxy(),
       adsbLolProxy(),
       aisLiveProxy(),
       trackBackfillProxies(),

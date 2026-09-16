@@ -665,10 +665,14 @@ test('the voice TOOL SCHEMA is byte-identical to main — the mission mapping is
   // voice, plus the common-name mapping line that makes "parking" resolve to
   // it. +151 bytes. Same guarded claim: this is a reviewed schema edit, and
   // any further drift still fails here.
-  assert.equal(block.length, 31340, 'tool schema byte length drifted from the pinned release schema');
+  //
+  // Re-pinned again the same day: coquitlam-trails, coquitlam-crime and
+  // translink-transit join the same enums with their own mapping clauses.
+  // +360 bytes.
+  assert.equal(block.length, 31700, 'tool schema byte length drifted from the pinned release schema');
   assert.equal(
     crypto.createHash('sha256').update(block).digest('hex'),
-    'af3b11f4512f865074ca2ec78f59d4c0c84bde7012ce756886b3dfa592a5c073',
+    '36cc48df3f6fcd3ddf767a2aeb17ecd8caa2887b8413b472de0220f3f4b37663',
     'the first-run missions must ride EXISTING tools: no schema edit, no cache bust',
   );
 

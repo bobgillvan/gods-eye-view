@@ -172,6 +172,11 @@ test('no unchanged Realtime tool definition drifts silently', () => {
   // in the common-name mapping. Verified as the SOLE cause: stripping just the
   // coquitlam-parking enum entries and that mapping clause from this set
   // reproduces the previous digest 802ed694b8887b88 exactly.
+  //
+  // Re-pinned again the same day for coquitlam-trails, coquitlam-crime and
+  // translink-transit, which join the same two enums. Verified the same way:
+  // stripping those three ids and their mapping clauses reproduces the
+  // intermediate digest cc749cfb23b9e4ba exactly.
   const TOUCHED = new Set([
     'set_context_mode',
     'control_cockpit',
@@ -189,7 +194,7 @@ test('no unchanged Realtime tool definition drifts silently', () => {
     .update(JSON.stringify(unchanged))
     .digest('hex')
     .slice(0, 16);
-  assert.equal(digest, 'cc749cfb23b9e4ba', 'an unchanged Realtime tool definition drifted');
+  assert.equal(digest, 'faa83d94a739051e', 'an unchanged Realtime tool definition drifted');
 });
 
 test('Radio volume and mission speed share the Sharpen slider visual language', () => {
