@@ -131,3 +131,75 @@ test('a SkyTrain route labels by its long name, not an empty short name', () => 
   assert.equal(routeLabel({ shortName: '143', longName: '' }), '143');
   assert.equal(routeLabel({}), 'Route');
 });
+
+test('the transit panel count reports live vehicles, not the static route count', async () => {
+  // The toggle panel renders stats.count. Reporting 74 routes on a layer whose
+  // whole point is moving vehicles made a working live feed look frozen — the
+  // number never changed between refreshes.
+  const { createTranslinkTransitLayer } = await import('./translinkTransit.js');
+
+  const network = {
+    feedVersion: 'TEST',
+    routes: [
+      {
+        id: 'r1',
+        routeId: 'R1',
+        color: '#0033a0',
+        width: 3,
+        routeType: 1,
+        coordinates: [
+          [-122.8, 49.28],
+          [-122.81, 49.29],
+        ],
+      },
+    ],
+    stops: [{ id: 's1', stopId: '1', name: 'Stop', lat: 49.28, lon: -122.8, isStation: false }],
+  };
+  const vehicles = {
+    configured: true,
+    vehicles: [
+      { id: 'v1', routeId: 'R1', lat: 49.281, lon: -122.801, bearing: null },
+      { id: 'v2', routeId: 'R1', lat: 49.282, lon: -122.802, bearing: null },
+      { id: 'v3', routeId: 'R1', lat: 49.283, lon: -122.803, bearing: null },
+    ],
+  };
+
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => ({
+    ok: true,
+    json: async () => (String(url).includes('vehicles') ? vehicles : network),
+  });
+  try {
+    const layer = createTranslinkTransitLayer();
+    const sources = [];
+    layer.init({ dataSources: { add: (ds) => sources.push(ds), remove() {} } });
+    await layer.update();
+
+    const stats = layer.getStats();
+    assert.equal(stats.vehicles, 3);
+    assert.equal(stats.routes, 1);
+    assert.equal(stats.count, 3, 'the panel count must be the VEHICLE count when keyed');
+    assert.notEqual(stats.count, stats.routes, 'reporting routes would make a live feed look static');
+
+    const vehicleSource = sources.find((d) => d.name === 'translink-vehicles');
+    assert.equal(vehicleSource.entities.values.length, 3);
+    const point = vehicleSource.entities.values[0].point;
+    const size = point.pixelSize?.getValue?.() ?? point.pixelSize;
+    assert.ok(size >= 14, `a vehicle must be clearly larger than a 4-8 px stop, got ${size}`);
+    assert.ok(
+      !point.distanceDisplayCondition,
+      'a vehicle stays visible when zoomed out past where stops are hidden',
+    );
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test('an unkeyed transit layer falls back to the route count rather than showing nothing', async () => {
+  const { createTranslinkTransitLayer } = await import('./translinkTransit.js');
+  const layer = createTranslinkTransitLayer();
+  layer.init({ dataSources: { add() {}, remove() {} } });
+  const stats = layer.getStats();
+  assert.equal(stats.vehicles, null, 'no key means no vehicle data, not zero vehicles');
+  assert.equal(stats.count, stats.routes);
+});

@@ -181,11 +181,16 @@ export function createTranslinkTransitLayer() {
       _vehicleSource.entities.add({
         id: `translink-vehicle-${vehicle.id || `${vehicle.lat},${vehicle.lon}`}`,
         position: Cesium.Cartesian3.fromDegrees(vehicle.lon, vehicle.lat),
+        // A vehicle must not look like a stop. Stops are 4-8 px and dim; a
+        // vehicle is larger, ringed in white and drawn at full brightness, so
+        // the moving things read as moving things at a glance. It also has no
+        // distanceDisplayCondition, unlike stops — a bus should still be
+        // visible when zoomed out past where its stop has been hidden.
         point: {
-          pixelSize: 10,
+          pixelSize: 16,
           color,
           outlineColor: Cesium.Color.WHITE,
-          outlineWidth: 2,
+          outlineWidth: 3,
           heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
         },
@@ -272,7 +277,11 @@ export function createTranslinkTransitLayer() {
 
     getStats() {
       return {
-        count: _routeCount,
+        // The toggle panel renders `count`. Reporting the ROUTE count on a
+        // layer whose point is live vehicles made a working feed look frozen:
+        // the number never moved. Prefer the vehicle count whenever the feed
+        // is keyed, and fall back to routes only when it is not.
+        count: _vehicleCount == null ? _routeCount : _vehicleCount,
         routes: _routeCount,
         stops: _stopCount,
         vehicles: _vehicleCount,
