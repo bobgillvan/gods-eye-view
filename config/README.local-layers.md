@@ -55,6 +55,7 @@ running right now", which would read as a working layer with nothing on it.
 | `TRANSLINK_API_KEY` | unset | Enables live vehicle positions. |
 | `TRANSLINK_BBOX` | `49.2,-122.95,49.4,-122.65` | `minLat,minLon,maxLat,maxLon`. Widen for more of Metro Vancouver. |
 | `COQUITLAM_CRIME_MONTHS` | `12` | Rolling window. `0` loads all years (2021–2026, ~6,200 points). |
+| `VITE_STARTUP_LOCATION` | `-122.7932,49.2838` | Where the globe opens, as `lon,lat`. Defaults to Coquitlam; upstream opens on Austin. |
 
 ## Two upstream behaviours worth knowing
 
