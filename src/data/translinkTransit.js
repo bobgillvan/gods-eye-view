@@ -10,6 +10,7 @@ import {
   hideVehicleCard,
   destroyVehicleCard,
 } from './translinkVehicleCard.js';
+import { registerSpriteCollection, unregisterSpriteCollection } from './spriteOrder.js';
 
 /**
  * TransLink transit — route lines, stations, and live vehicles.
@@ -25,6 +26,14 @@ import {
  * Bus stops are drawn only when zoomed in. There are 1,710 of them in the
  * bounding box, and at city zoom they merge into a solid band that hides the
  * routes underneath.
+ *
+ * STOPS AND VEHICLES ARE PRIMITIVES, NOT ENTITIES. 1,710 stop Entities cost
+ * roughly 96 % of this layer's scene objects and visibly drop the frame rate
+ * when the layer is on — each Entity carries its own property bag and is
+ * re-evaluated per frame. A PointPrimitiveCollection batches them into one GPU
+ * draw, which is how flights (5,000+ aircraft), bikeshare and CCTV already
+ * render their dense point sets. Routes stay Entities: there are only 74, and
+ * polylines want the entity layer's `clampToGround` handling.
  */
 
 const NETWORK_URL = '/api/translink/network';
@@ -124,7 +133,8 @@ export function vehicleShareText(vehicle) {
  */
 export function createTranslinkTransitLayer() {
   let _dataSource = null;
-  let _vehicleSource = null;
+  let _stopPoints = null;
+  let _vehiclePoints = null;
   let _networkLoadedAt = 0;
   let _routeCount = 0;
   let _stopCount = 0;
@@ -180,29 +190,26 @@ export function createTranslinkTransitLayer() {
       });
     }
 
+    _stopPoints.removeAll();
+    const stationColor = Cesium.Color.fromCssColorString('#00e0ff');
+    const stopColor = Cesium.Color.fromCssColorString('#33cc77').withAlpha(0.7);
+    const outline = Cesium.Color.BLACK.withAlpha(0.6);
     for (const stop of stops) {
       const isStation = Boolean(stop.isStation);
-      _dataSource.entities.add({
+      _stopPoints.add({
         id: stop.id,
         position: Cesium.Cartesian3.fromDegrees(stop.lon, stop.lat),
-        point: {
-          pixelSize: isStation ? 8 : 4,
-          color: isStation
-            ? Cesium.Color.fromCssColorString('#00e0ff')
-            : Cesium.Color.fromCssColorString('#33cc77').withAlpha(0.7),
-          outlineColor: Cesium.Color.BLACK.withAlpha(0.6),
-          outlineWidth: 1,
-          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-          distanceDisplayCondition: new Cesium.DistanceDisplayCondition(
-            0,
-            isStation ? STATION_VISIBLE_M : STOP_VISIBLE_M,
-          ),
-        },
-        properties: {
-          layerId: 'translink-transit',
-          stopName: stop.name,
-          isStation,
-        },
+        pixelSize: isStation ? 8 : 4,
+        color: isStation ? stationColor : stopColor,
+        outlineColor: outline,
+        outlineWidth: 1,
+        // A primitive has no heightReference; clamping 1,710 points to terrain
+        // is exactly the per-frame work this change exists to avoid. They sit
+        // at ellipsoid height, which at stop scale is imperceptible.
+        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(
+          0,
+          isStation ? STATION_VISIBLE_M : STOP_VISIBLE_M,
+        ),
       });
     }
 
@@ -227,39 +234,31 @@ export function createTranslinkTransitLayer() {
       // Not an error: the layer works without a key, it just has no vehicles.
       _keyed = false;
       _vehicleCount = null;
-      _vehicleSource.entities.removeAll();
+      _vehiclePoints.removeAll();
       return;
     }
     _keyed = true;
     const vehicles = Array.isArray(payload?.vehicles) ? payload.vehicles : [];
-    _vehicleSource.entities.removeAll();
+    _vehiclePoints.removeAll();
     _vehicleRecords.clear();
     for (const vehicle of vehicles) {
       if (!Number.isFinite(vehicle.lat) || !Number.isFinite(vehicle.lon)) continue;
       const color = _routeColors.get(vehicle.routeId) || Cesium.Color.WHITE;
       const entityId = `translink-vehicle-${vehicle.id || `${vehicle.lat},${vehicle.lon}`}`;
       _vehicleRecords.set(entityId, vehicle);
-      _vehicleSource.entities.add({
+      // A vehicle must not look like a stop. Stops are 4-8 px and dim; a
+      // vehicle is larger, ringed in white and drawn at full brightness, so
+      // the moving things read as moving things at a glance. It also has no
+      // distanceDisplayCondition, unlike stops — a bus should still be visible
+      // when zoomed out past where its stop has been hidden.
+      _vehiclePoints.add({
         id: entityId,
         position: Cesium.Cartesian3.fromDegrees(vehicle.lon, vehicle.lat),
-        // A vehicle must not look like a stop. Stops are 4-8 px and dim; a
-        // vehicle is larger, ringed in white and drawn at full brightness, so
-        // the moving things read as moving things at a glance. It also has no
-        // distanceDisplayCondition, unlike stops — a bus should still be
-        // visible when zoomed out past where its stop has been hidden.
-        point: {
-          pixelSize: 16,
-          color,
-          outlineColor: Cesium.Color.WHITE,
-          outlineWidth: 3,
-          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-          disableDepthTestDistance: Number.POSITIVE_INFINITY,
-        },
-        properties: {
-          layerId: 'translink-transit',
-          routeId: vehicle.routeId,
-          bearing: vehicle.bearing,
-        },
+        pixelSize: 16,
+        color,
+        outlineColor: Cesium.Color.WHITE,
+        outlineWidth: 3,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
       });
     }
     _vehicleCount = vehicles.length;
@@ -285,11 +284,22 @@ export function createTranslinkTransitLayer() {
 
     init(viewer) {
       _dataSource = new Cesium.CustomDataSource('translink-transit');
-      _vehicleSource = new Cesium.CustomDataSource('translink-vehicles');
       _dataSource.show = false;
-      _vehicleSource.show = false;
       viewer.dataSources.add(_dataSource);
-      viewer.dataSources.add(_vehicleSource);
+
+      // Dense point sets go through primitive collections — see the header.
+      _stopPoints = new Cesium.PointPrimitiveCollection({
+        blendOption: Cesium.BlendOption.TRANSLUCENT,
+      });
+      _vehiclePoints = new Cesium.PointPrimitiveCollection({
+        blendOption: Cesium.BlendOption.TRANSLUCENT,
+      });
+      _stopPoints.show = false;
+      _vehiclePoints.show = false;
+      viewer.scene.primitives.add(_stopPoints);
+      viewer.scene.primitives.add(_vehiclePoints);
+      registerSpriteCollection('translink-stops', _stopPoints);
+      registerSpriteCollection('translink-transit', _vehiclePoints);
 
       // Claim our own entity ids so a sibling layer's click handler leaves
       // them alone, and vice versa — every layer here picks from one scene.
@@ -333,19 +343,21 @@ export function createTranslinkTransitLayer() {
 
     enable() {
       if (_dataSource) _dataSource.show = true;
-      if (_vehicleSource) _vehicleSource.show = true;
+      if (_stopPoints) _stopPoints.show = true;
+      if (_vehiclePoints) _vehiclePoints.show = true;
     },
 
     disable() {
       if (_dataSource) _dataSource.show = false;
-      if (_vehicleSource) _vehicleSource.show = false;
+      if (_stopPoints) _stopPoints.show = false;
+      if (_vehiclePoints) _vehiclePoints.show = false;
       // A card left open over a hidden layer points at nothing.
       _selectedId = null;
       hideVehicleCard();
     },
 
     async update() {
-      if (!_dataSource) return false;
+      if (!_dataSource || !_stopPoints || !_vehiclePoints) return false;
       try {
         const needsNetwork =
           !_networkLoadedAt || Date.now() - _networkLoadedAt > NETWORK_REFRESH_MS;
@@ -375,16 +387,24 @@ export function createTranslinkTransitLayer() {
       destroyVehicleCard();
       _vehicleRecords.clear();
       _selectedId = null;
-      for (const source of [_dataSource, _vehicleSource]) {
-        if (!source) continue;
+      unregisterSpriteCollection('translink-stops', _stopPoints);
+      unregisterSpriteCollection('translink-transit', _vehiclePoints);
+      for (const collection of [_stopPoints, _vehiclePoints]) {
+        if (!collection) continue;
         try {
-          viewer?.dataSources?.remove(source, true);
+          viewer?.scene?.primitives?.remove(collection);
         } catch {
           /* viewer already torn down */
         }
       }
+      try {
+        if (_dataSource) viewer?.dataSources?.remove(_dataSource, true);
+      } catch {
+        /* viewer already torn down */
+      }
       _dataSource = null;
-      _vehicleSource = null;
+      _stopPoints = null;
+      _vehiclePoints = null;
     },
 
     getStats() {

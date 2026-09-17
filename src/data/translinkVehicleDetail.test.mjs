@@ -86,3 +86,81 @@ test('feed text is escaped before it reaches innerHTML', () => {
   assert.equal(escapeHtml(`Bay "3" & 4's`), 'Bay &quot;3&quot; &amp; 4&#39;s');
   assert.equal(escapeHtml(null), '');
 });
+
+test('dense points are GPU primitives, not per-frame entities', async () => {
+  // 1,710 stop Entities were ~96% of this layer's scene objects and visibly
+  // cost frame rate when the layer was on. Every other dense layer here
+  // (flights at 5,000+, bikeshare, CCTV) batches into a primitive collection;
+  // this pins that this one does too. Routes stay entities — there are 74, and
+  // polylines want the entity layer's clampToGround.
+  const Cesium = await import('cesium');
+  const { createTranslinkTransitLayer } = await import('./translinkTransit.js');
+
+  const network = {
+    routes: Array.from({ length: 3 }, (_, i) => ({
+      id: `r${i}`,
+      routeId: `R${i}`,
+      color: '#33cc77',
+      width: 2,
+      routeType: 3,
+      coordinates: [
+        [-122.8, 49.28],
+        [-122.81, 49.29],
+      ],
+    })),
+    stops: Array.from({ length: 50 }, (_, i) => ({
+      id: `s${i}`,
+      stopId: String(i),
+      name: `Stop ${i}`,
+      lat: 49.28 + i * 0.0001,
+      lon: -122.8,
+      isStation: i === 0,
+    })),
+  };
+  const vehicles = {
+    configured: true,
+    vehicles: Array.from({ length: 7 }, (_, i) => ({
+      id: `v${i}`,
+      routeId: 'R0',
+      lat: 49.281,
+      lon: -122.801,
+    })),
+  };
+
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => ({
+    ok: true,
+    json: async () => (String(url).includes('vehicles') ? vehicles : network),
+  });
+  try {
+    const primitives = [];
+    const dataSources = [];
+    const layer = createTranslinkTransitLayer();
+    layer.init({
+      dataSources: { add: (d) => dataSources.push(d), remove() {} },
+      scene: { primitives: { add: (p) => primitives.push(p), remove() {} }, canvas: null },
+    });
+    await layer.update();
+
+    assert.equal(primitives.length, 2, 'one collection for stops, one for vehicles');
+    for (const collection of primitives) {
+      assert.ok(
+        collection instanceof Cesium.PointPrimitiveCollection,
+        'dense points must batch into a PointPrimitiveCollection',
+      );
+    }
+    const [stopPoints, vehiclePoints] = primitives;
+    assert.equal(stopPoints.length, 50);
+    assert.equal(vehiclePoints.length, 7);
+
+    // The entity layer carries ONLY the route polylines.
+    const entities = dataSources[0].entities.values;
+    assert.equal(entities.length, 3, 'stops and vehicles must not be entities');
+    for (const entity of entities) {
+      assert.ok(entity.polyline, 'the only entities left are route polylines');
+      assert.equal(entity.point, undefined);
+    }
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});

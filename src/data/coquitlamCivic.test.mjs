@@ -172,7 +172,11 @@ test('the transit panel count reports live vehicles, not the static route count'
   try {
     const layer = createTranslinkTransitLayer();
     const sources = [];
-    layer.init({ dataSources: { add: (ds) => sources.push(ds), remove() {} } });
+    const primitives = [];
+    layer.init({
+      dataSources: { add: (ds) => sources.push(ds), remove() {} },
+      scene: { primitives: { add: (p) => primitives.push(p), remove() {} }, canvas: null },
+    });
     await layer.update();
 
     const stats = layer.getStats();
@@ -181,11 +185,14 @@ test('the transit panel count reports live vehicles, not the static route count'
     assert.equal(stats.count, 3, 'the panel count must be the VEHICLE count when keyed');
     assert.notEqual(stats.count, stats.routes, 'reporting routes would make a live feed look static');
 
-    const vehicleSource = sources.find((d) => d.name === 'translink-vehicles');
-    assert.equal(vehicleSource.entities.values.length, 3);
-    const point = vehicleSource.entities.values[0].point;
-    const size = point.pixelSize?.getValue?.() ?? point.pixelSize;
-    assert.ok(size >= 14, `a vehicle must be clearly larger than a 4-8 px stop, got ${size}`);
+    // Vehicles are primitives, not entities — see the primitive-batching test.
+    const vehiclePoints = primitives[1];
+    assert.equal(vehiclePoints.length, 3);
+    const point = vehiclePoints.get(0);
+    assert.ok(
+      point.pixelSize >= 14,
+      `a vehicle must be clearly larger than a 4-8 px stop, got ${point.pixelSize}`,
+    );
     assert.ok(
       !point.distanceDisplayCondition,
       'a vehicle stays visible when zoomed out past where stops are hidden',
@@ -198,7 +205,10 @@ test('the transit panel count reports live vehicles, not the static route count'
 test('an unkeyed transit layer falls back to the route count rather than showing nothing', async () => {
   const { createTranslinkTransitLayer } = await import('./translinkTransit.js');
   const layer = createTranslinkTransitLayer();
-  layer.init({ dataSources: { add() {}, remove() {} } });
+  layer.init({
+    dataSources: { add() {}, remove() {} },
+    scene: { primitives: { add() {}, remove() {} }, canvas: null },
+  });
   const stats = layer.getStats();
   assert.equal(stats.vehicles, null, 'no key means no vehicle data, not zero vehicles');
   assert.equal(stats.count, stats.routes);
