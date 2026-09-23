@@ -98,7 +98,8 @@ function centroidOf(geometry) {
   if (!geometry) return null;
   let ring = null;
   if (geometry.type === 'Polygon') ring = geometry.coordinates?.[0];
-  else if (geometry.type === 'MultiPolygon') ring = geometry.coordinates?.[0]?.[0];
+  else if (geometry.type === 'MultiPolygon')
+    ring = geometry.coordinates?.[0]?.[0];
   if (!Array.isArray(ring) || ring.length === 0) return null;
 
   let sx = 0;
@@ -123,7 +124,8 @@ function centroidOf(geometry) {
  */
 async function loadGeometry() {
   const now = Date.now();
-  if (_geometryCache && now - _geometryCachedAt <= GEOMETRY_TTL_MS) return _geometryCache;
+  if (_geometryCache && now - _geometryCachedAt <= GEOMETRY_TTL_MS)
+    return _geometryCache;
 
   try {
     const resp = await fetchBounded(ARCGIS_LOTS_URL);
@@ -156,7 +158,10 @@ async function loadGeometry() {
     }
     return lots.length ? lots : _geometryCache || [];
   } catch (error) {
-    console.warn('[coquitlam-parking] geometry fetch failed:', error?.message || error);
+    console.warn(
+      '[coquitlam-parking] geometry fetch failed:',
+      error?.message || error,
+    );
     // Serve stale geometry rather than an empty layer — lot shapes do not move.
     return _geometryCache || [];
   }
@@ -172,7 +177,8 @@ async function loadGeometry() {
  */
 async function loadOccupancy() {
   const now = Date.now();
-  if (_occupancyCache && now - _occupancyCachedAt <= OCCUPANCY_TTL_MS) return _occupancyCache;
+  if (_occupancyCache && now - _occupancyCachedAt <= OCCUPANCY_TTL_MS)
+    return _occupancyCache;
 
   try {
     const resp = await fetchBounded(OCCUPANCY_URL);
@@ -186,10 +192,15 @@ async function loadOccupancy() {
       return out;
     }
     // Parsed cleanly but matched nothing — the feed's shape probably changed.
-    console.warn('[coquitlam-parking] occupancy feed matched 0 lots; shape may have changed');
+    console.warn(
+      '[coquitlam-parking] occupancy feed matched 0 lots; shape may have changed',
+    );
     return _occupancyCache || {};
   } catch (error) {
-    console.warn('[coquitlam-parking] occupancy fetch failed:', error?.message || error);
+    console.warn(
+      '[coquitlam-parking] occupancy fetch failed:',
+      error?.message || error,
+    );
     return _occupancyCache || {};
   }
 }
@@ -200,11 +211,15 @@ async function loadOccupancy() {
  * @returns {Promise<{generatedAt: string, lots: Array<object>, occupancyAvailable: boolean, unmappedWidgets: string[]}>}
  */
 export async function getCoquitlamParking() {
-  const [geometry, occupancy] = await Promise.all([loadGeometry(), loadOccupancy()]);
+  const [geometry, occupancy] = await Promise.all([
+    loadGeometry(),
+    loadOccupancy(),
+  ]);
 
   const byLotName = new Map();
   for (const [widgetId, lotName] of Object.entries(WIDGET_TO_LOT)) {
-    if (occupancy[widgetId]) byLotName.set(lotName, { widgetId, ...occupancy[widgetId] });
+    if (occupancy[widgetId])
+      byLotName.set(lotName, { widgetId, ...occupancy[widgetId] });
   }
 
   const lots = geometry.map((lot) => {
@@ -254,21 +269,23 @@ export async function getCoquitlamParking() {
  * @returns {object} Vite plugin.
  */
 export function coquitlamParkingProxy() {
+  const installMiddleware = (server) => {
+    server.middlewares.use('/api/coquitlam-parking', async (_req, res) => {
+      try {
+        const payload = await getCoquitlamParking();
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Cache-Control', 'no-store');
+        res.end(JSON.stringify(payload));
+      } catch (error) {
+        res.statusCode = 500;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ error: String(error?.message || error) }));
+      }
+    });
+  };
   return {
     name: 'coquitlam-parking-proxy',
-    configureServer(server) {
-      server.middlewares.use('/api/coquitlam-parking', async (_req, res) => {
-        try {
-          const payload = await getCoquitlamParking();
-          res.setHeader('Content-Type', 'application/json');
-          res.setHeader('Cache-Control', 'no-store');
-          res.end(JSON.stringify(payload));
-        } catch (error) {
-          res.statusCode = 500;
-          res.setHeader('Content-Type', 'application/json');
-          res.end(JSON.stringify({ error: String(error?.message || error) }));
-        }
-      });
-    },
+    configureServer: installMiddleware,
+    configurePreviewServer: installMiddleware,
   };
 }

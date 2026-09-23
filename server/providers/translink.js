@@ -25,9 +25,13 @@
  * fine for local personal use; check TransLink's API terms before redistributing.
  */
 
-import { parseCsv, buildLocalNetwork } from '../../src/data/translinkGtfsParse.js';
+import {
+  parseCsv,
+  buildLocalNetwork,
+} from '../../src/data/translinkGtfsParse.js';
 
-const GTFS_STATIC_URL = 'https://gtfs-static.translink.ca/gtfs/google_transit.zip';
+const GTFS_STATIC_URL =
+  'https://gtfs-static.translink.ca/gtfs/google_transit.zip';
 const GTFS_REALTIME_POSITIONS = 'https://gtfsapi.translink.ca/v3/gtfsposition';
 
 /**
@@ -72,7 +76,9 @@ function resolveBbox() {
     .split(',')
     .map((n) => Number(n.trim()));
   if (parts.length !== 4 || parts.some((n) => !Number.isFinite(n))) {
-    console.warn('[TransLink] TRANSLINK_BBOX is not "minLat,minLon,maxLat,maxLon"; using default');
+    console.warn(
+      '[TransLink] TRANSLINK_BBOX is not "minLat,minLon,maxLat,maxLon"; using default',
+    );
     return DEFAULT_BBOX;
   }
   const [minLat, minLon, maxLat, maxLon] = parts;
@@ -99,7 +105,10 @@ async function fetchBounded(url, timeoutMs, init = {}) {
     return await fetch(url, {
       ...init,
       signal: controller.signal,
-      headers: { 'User-Agent': 'gods-eye-view-local/1.0', ...(init.headers || {}) },
+      headers: {
+        'User-Agent': 'gods-eye-view-local/1.0',
+        ...(init.headers || {}),
+      },
     });
   } finally {
     clearTimeout(timer);
@@ -132,7 +141,8 @@ async function extractFromZip(buf, wanted) {
       break;
     }
   }
-  if (eocd < 0) throw new Error('not a zip file (no end-of-central-directory record)');
+  if (eocd < 0)
+    throw new Error('not a zip file (no end-of-central-directory record)');
 
   const entryCount = buf.readUInt16LE(eocd + 10);
   let offset = buf.readUInt32LE(eocd + 16);
@@ -159,7 +169,9 @@ async function extractFromZip(buf, wanted) {
     const dataStart = localOffset + 30 + lhNameLen + lhExtraLen;
     const raw = buf.subarray(dataStart, dataStart + compressedSize);
     const text =
-      method === 0 ? raw.toString('utf8') : (await inflateRaw(raw)).toString('utf8');
+      method === 0
+        ? raw.toString('utf8')
+        : (await inflateRaw(raw)).toString('utf8');
     out.set(name, text);
     want.delete(name);
   }
@@ -174,14 +186,19 @@ async function extractFromZip(buf, wanted) {
  */
 async function loadNetwork() {
   const now = Date.now();
-  if (_networkCache && now - _networkCachedAt < NETWORK_TTL_MS) return _networkCache;
+  if (_networkCache && now - _networkCachedAt < NETWORK_TTL_MS)
+    return _networkCache;
   if (_networkInFlight) return _networkInFlight;
 
   _networkInFlight = (async () => {
-    const response = await fetchBounded(GTFS_STATIC_URL, STATIC_FETCH_TIMEOUT_MS);
+    const response = await fetchBounded(
+      GTFS_STATIC_URL,
+      STATIC_FETCH_TIMEOUT_MS,
+    );
     if (!response.ok) throw new Error(`GTFS static HTTP ${response.status}`);
     const buf = Buffer.from(await response.arrayBuffer());
-    if (buf.length > MAX_ZIP_BYTES) throw new Error(`GTFS zip too large: ${buf.length} bytes`);
+    if (buf.length > MAX_ZIP_BYTES)
+      throw new Error(`GTFS zip too large: ${buf.length} bytes`);
 
     const files = await extractFromZip(buf, [
       'routes.txt',
@@ -190,7 +207,12 @@ async function loadNetwork() {
       'stops.txt',
       'feed_info.txt',
     ]);
-    for (const needed of ['routes.txt', 'trips.txt', 'shapes.txt', 'stops.txt']) {
+    for (const needed of [
+      'routes.txt',
+      'trips.txt',
+      'shapes.txt',
+      'stops.txt',
+    ]) {
       if (!files.has(needed)) throw new Error(`GTFS zip missing ${needed}`);
     }
 
@@ -355,7 +377,8 @@ export function parseVehiclePositions(buf) {
         walk(b3, s3, e3, (f4, w4, b4, s4, e4) => {
           if (w4 !== 2) return;
           if (f4 === 2) vehicleLabel = b4.toString('utf8', s4, e4);
-          else if (f4 === 1 && !vehicleLabel) vehicleLabel = b4.toString('utf8', s4, e4);
+          else if (f4 === 1 && !vehicleLabel)
+            vehicleLabel = b4.toString('utf8', s4, e4);
         });
       }
     });
@@ -387,135 +410,146 @@ export function parseVehiclePositions(buf) {
  * @returns {import('vite').Plugin}
  */
 export function translinkProxy() {
-  return {
-    name: 'translink-proxy',
-    configureServer(server) {
-      server.middlewares.use('/api/translink/network', async (req, res) => {
-        const send = (code, body) => {
-          res.writeHead(code, {
-            'Content-Type': 'application/json',
-            'Cache-Control': 'no-store',
-          });
-          res.end(JSON.stringify(body));
-        };
-        if (req.method !== 'GET') return send(405, { error: 'Method Not Allowed' });
-        try {
-          send(200, await loadNetwork());
-        } catch (error) {
-          const message = String(error?.message || error);
-          console.warn('[TransLink] network failed:', message);
-          // Serve stale rather than nothing: a day-old transit map is still
-          // correct, and the alternative is an empty layer.
-          if (_networkCache) return send(200, { ..._networkCache, stale: true, error: message });
-          send(502, { error: message, routes: [], stops: [] });
-        }
-      });
+  const installMiddleware = (server) => {
+    server.middlewares.use('/api/translink/network', async (req, res) => {
+      const send = (code, body) => {
+        res.writeHead(code, {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store',
+        });
+        res.end(JSON.stringify(body));
+      };
+      if (req.method !== 'GET')
+        return send(405, { error: 'Method Not Allowed' });
+      try {
+        send(200, await loadNetwork());
+      } catch (error) {
+        const message = String(error?.message || error);
+        console.warn('[TransLink] network failed:', message);
+        // Serve stale rather than nothing: a day-old transit map is still
+        // correct, and the alternative is an empty layer.
+        if (_networkCache)
+          return send(200, { ..._networkCache, stale: true, error: message });
+        send(502, { error: message, routes: [], stops: [] });
+      }
+    });
 
-      server.middlewares.use('/api/translink/vehicles', async (req, res) => {
-        const send = (code, body) => {
-          res.writeHead(code, {
-            'Content-Type': 'application/json',
-            'Cache-Control': 'no-store',
-          });
-          res.end(JSON.stringify(body));
-        };
-        if (req.method !== 'GET') return send(405, { error: 'Method Not Allowed' });
+    server.middlewares.use('/api/translink/vehicles', async (req, res) => {
+      const send = (code, body) => {
+        res.writeHead(code, {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store',
+        });
+        res.end(JSON.stringify(body));
+      };
+      if (req.method !== 'GET')
+        return send(405, { error: 'Method Not Allowed' });
 
-        const apiKey = process.env.TRANSLINK_API_KEY;
-        if (!apiKey) {
-          // Explicitly NOT an empty 200: see the module header.
-          return send(200, {
-            configured: false,
-            vehicles: [],
-            message:
-              'TRANSLINK_API_KEY is not set. Get a free key at https://developer.translink.ca/ ' +
-              'and add it to .env to enable live vehicle positions.',
-          });
-        }
+      const apiKey = process.env.TRANSLINK_API_KEY;
+      if (!apiKey) {
+        // Explicitly NOT an empty 200: see the module header.
+        return send(200, {
+          configured: false,
+          vehicles: [],
+          message:
+            'TRANSLINK_API_KEY is not set. Get a free key at https://developer.translink.ca/ ' +
+            'and add it to .env to enable live vehicle positions.',
+        });
+      }
 
-        const now = Date.now();
-        if (_vehiclesCache && now - _vehiclesCachedAt < VEHICLES_TTL_MS) {
-          return send(200, _vehiclesCache);
-        }
+      const now = Date.now();
+      if (_vehiclesCache && now - _vehiclesCachedAt < VEHICLES_TTL_MS) {
+        return send(200, _vehiclesCache);
+      }
 
-        try {
-          // Warm the static network first so ids can be resolved to names. It
-          // is cached for a day, so this costs nothing after the first call;
-          // a failure here must not block vehicles, which are the live part.
-          if (!_networkCache) {
-            try {
-              await loadNetwork();
-            } catch (networkError) {
-              console.warn(
-                '[TransLink] network unavailable for vehicle enrichment:',
-                String(networkError?.message || networkError),
-              );
-            }
+      try {
+        // Warm the static network first so ids can be resolved to names. It
+        // is cached for a day, so this costs nothing after the first call;
+        // a failure here must not block vehicles, which are the live part.
+        if (!_networkCache) {
+          try {
+            await loadNetwork();
+          } catch (networkError) {
+            console.warn(
+              '[TransLink] network unavailable for vehicle enrichment:',
+              String(networkError?.message || networkError),
+            );
           }
+        }
 
-          const url = `${GTFS_REALTIME_POSITIONS}?apikey=${encodeURIComponent(apiKey)}`;
-          const response = await fetchBounded(url, REALTIME_FETCH_TIMEOUT_MS);
-          if (response.status === 403 || response.status === 401) {
-            return send(200, {
-              configured: true,
-              vehicles: [],
-              error: `TransLink rejected the API key (HTTP ${response.status})`,
+        const url = `${GTFS_REALTIME_POSITIONS}?apikey=${encodeURIComponent(apiKey)}`;
+        const response = await fetchBounded(url, REALTIME_FETCH_TIMEOUT_MS);
+        if (response.status === 403 || response.status === 401) {
+          return send(200, {
+            configured: true,
+            vehicles: [],
+            error: `TransLink rejected the API key (HTTP ${response.status})`,
+          });
+        }
+        if (!response.ok) throw new Error(`realtime HTTP ${response.status}`);
+        const buf = Buffer.from(await response.arrayBuffer());
+        const bbox = resolveBbox();
+        const all = parseVehiclePositions(buf);
+        const vehicles = all.filter(
+          (v) =>
+            v.lat >= bbox.minLat &&
+            v.lat <= bbox.maxLat &&
+            v.lon >= bbox.minLon &&
+            v.lon <= bbox.maxLon,
+        );
+        // Resolve ids to names using the static network already in cache.
+        // "Route 6626, stop 21" tells a rider nothing; "145 SFU/Production
+        // Station, next stop Barnet Hwy @ Cameron St" tells them everything.
+        // Enrichment is best-effort: the network cache may be cold on the
+        // first vehicles call, and a vehicle with unresolved names is still
+        // worth drawing.
+        const routeNames = new Map();
+        const stopNames = new Map();
+        if (_networkCache) {
+          for (const route of _networkCache.routes || []) {
+            routeNames.set(route.routeId, {
+              label: [route.shortName, route.longName]
+                .filter(Boolean)
+                .join(' ')
+                .trim(),
+              kind: route.kind,
+              color: route.color,
             });
           }
-          if (!response.ok) throw new Error(`realtime HTTP ${response.status}`);
-          const buf = Buffer.from(await response.arrayBuffer());
-          const bbox = resolveBbox();
-          const all = parseVehiclePositions(buf);
-          const vehicles = all.filter(
-            (v) =>
-              v.lat >= bbox.minLat &&
-              v.lat <= bbox.maxLat &&
-              v.lon >= bbox.minLon &&
-              v.lon <= bbox.maxLon,
-          );
-          // Resolve ids to names using the static network already in cache.
-          // "Route 6626, stop 21" tells a rider nothing; "145 SFU/Production
-          // Station, next stop Barnet Hwy @ Cameron St" tells them everything.
-          // Enrichment is best-effort: the network cache may be cold on the
-          // first vehicles call, and a vehicle with unresolved names is still
-          // worth drawing.
-          const routeNames = new Map();
-          const stopNames = new Map();
-          if (_networkCache) {
-            for (const route of _networkCache.routes || []) {
-              routeNames.set(route.routeId, {
-                label: [route.shortName, route.longName].filter(Boolean).join(' ').trim(),
-                kind: route.kind,
-                color: route.color,
-              });
-            }
-            for (const stop of _networkCache.stops || []) stopNames.set(stop.stopId, stop.name);
-          }
-          for (const vehicle of vehicles) {
-            const route = routeNames.get(vehicle.routeId);
-            vehicle.routeLabel = route?.label || null;
-            vehicle.kind = route?.kind || null;
-            vehicle.color = route?.color || null;
-            vehicle.stopName = vehicle.stopId ? stopNames.get(vehicle.stopId) || null : null;
-          }
-
-          const payload = {
-            configured: true,
-            generatedAt: new Date().toISOString(),
-            attribution: 'TransLink',
-            systemCount: all.length,
-            enriched: _networkCache != null,
-            vehicles,
-          };
-          _vehiclesCache = payload;
-          _vehiclesCachedAt = Date.now();
-          send(200, payload);
-        } catch (error) {
-          const message = String(error?.message || error);
-          console.warn('[TransLink] vehicles failed:', message);
-          send(200, { configured: true, vehicles: [], error: message });
+          for (const stop of _networkCache.stops || [])
+            stopNames.set(stop.stopId, stop.name);
         }
-      });
-    },
+        for (const vehicle of vehicles) {
+          const route = routeNames.get(vehicle.routeId);
+          vehicle.routeLabel = route?.label || null;
+          vehicle.kind = route?.kind || null;
+          vehicle.color = route?.color || null;
+          vehicle.stopName = vehicle.stopId
+            ? stopNames.get(vehicle.stopId) || null
+            : null;
+        }
+
+        const payload = {
+          configured: true,
+          generatedAt: new Date().toISOString(),
+          attribution: 'TransLink',
+          systemCount: all.length,
+          enriched: _networkCache != null,
+          vehicles,
+        };
+        _vehiclesCache = payload;
+        _vehiclesCachedAt = Date.now();
+        send(200, payload);
+      } catch (error) {
+        const message = String(error?.message || error);
+        console.warn('[TransLink] vehicles failed:', message);
+        send(200, { configured: true, vehicles: [], error: message });
+      }
+    });
+  };
+  return {
+    name: 'translink-proxy',
+    configureServer: installMiddleware,
+    configurePreviewServer: installMiddleware,
   };
 }

@@ -22,11 +22,15 @@ export function parseOccupancyFeed(js) {
   if (!text) return {};
 
   const free = {};
-  for (const m of text.matchAll(/#(parkinglot-[\d-]+) \.pagestats-number"\)\.text\("(\d+)"\)/g)) {
+  for (const m of text.matchAll(
+    /#(parkinglot-[\d-]+) \.pagestats-number"\)\.text\("(\d+)"\)/g,
+  )) {
     free[m[1]] = Number(m[2]);
   }
   const labels = {};
-  for (const m of text.matchAll(/#(parkinglot-[\d-]+) \.pagestats-body"\)\.text\("([^"]*)"\)/g)) {
+  for (const m of text.matchAll(
+    /#(parkinglot-[\d-]+) \.pagestats-body"\)\.text\("([^"]*)"\)/g,
+  )) {
     labels[m[1]] = m[2];
   }
   const caps = {};

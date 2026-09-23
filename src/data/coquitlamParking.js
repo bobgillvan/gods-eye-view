@@ -23,9 +23,9 @@ const REFRESH_MS = 60 * 1000;
 
 /** Fill/outline colour by how full the lot is. */
 const OCCUPANCY_COLORS = Object.freeze([
-  { maxPct: 50, css: '#22dd66', label: 'open' },       // green  — plenty
-  { maxPct: 80, css: '#ffd21e', label: 'filling' },    // amber  — filling
-  { maxPct: 95, css: '#ff8a00', label: 'busy' },       // orange — nearly full
+  { maxPct: 50, css: '#22dd66', label: 'open' }, // green  — plenty
+  { maxPct: 80, css: '#ffd21e', label: 'filling' }, // amber  — filling
+  { maxPct: 95, css: '#ff8a00', label: 'busy' }, // orange — nearly full
   { maxPct: Infinity, css: '#ff2d2d', label: 'full' }, // red    — full
 ]);
 /** Occupancy unknown (live feed down). Deliberately not green. */
@@ -213,7 +213,10 @@ export function createCoquitlamParkingLayer() {
                 disableDepthTestDistance: Number.POSITIVE_INFINITY,
                 // Lots are ~100 m across; hide the text from orbit so the
                 // labels do not pile up into a smear at globe zoom.
-                distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 12000),
+                distanceDisplayCondition: new Cesium.DistanceDisplayCondition(
+                  0,
+                  12000,
+                ),
                 scaleByDistance: new Cesium.NearFarScalar(500, 1.0, 9000, 0.55),
               },
               properties: { layerId: 'coquitlam-parking', lotName: lot.name },
@@ -227,7 +230,10 @@ export function createCoquitlamParkingLayer() {
         _lastUpdate = Date.now();
         // Geometry without occupancy is a degraded success, not a failure: the
         // lots still draw, so say so rather than reporting a hard error.
-        _lastError = payload?.occupancyAvailable === false ? 'Live counts unavailable' : null;
+        _lastError =
+          payload?.occupancyAvailable === false
+            ? 'Live counts unavailable'
+            : null;
         return true;
       } catch (error) {
         _lastError = String(error?.message || error);

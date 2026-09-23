@@ -10,7 +10,10 @@ import {
   hideVehicleCard,
   destroyVehicleCard,
 } from './translinkVehicleCard.js';
-import { registerSpriteCollection, unregisterSpriteCollection } from './spriteOrder.js';
+import {
+  registerSpriteCollection,
+  unregisterSpriteCollection,
+} from './spriteOrder.js';
 
 /**
  * TransLink transit — route lines, stations, and live vehicles.
@@ -98,13 +101,25 @@ export function vehicleDetailRows(vehicle) {
   if (vehicle?.vehicleLabel) rows.push(['Vehicle', `#${vehicle.vehicleLabel}`]);
   if (vehicle?.stopName) rows.push(['Next stop', vehicle.stopName]);
   else if (vehicle?.stopId) rows.push(['Next stop id', String(vehicle.stopId)]);
-  if (Number.isFinite(vehicle?.stopSequence)) rows.push(['Stop #', String(vehicle.stopSequence)]);
+  if (Number.isFinite(vehicle?.stopSequence))
+    rows.push(['Stop #', String(vehicle.stopSequence)]);
   if (Number.isFinite(vehicle?.lat) && Number.isFinite(vehicle?.lon)) {
-    rows.push(['Position', `${vehicle.lat.toFixed(5)}, ${vehicle.lon.toFixed(5)}`]);
+    rows.push([
+      'Position',
+      `${vehicle.lat.toFixed(5)}, ${vehicle.lon.toFixed(5)}`,
+    ]);
   }
   if (Number.isFinite(vehicle?.timestamp)) {
-    const age = Math.max(0, Math.round((Date.now() - vehicle.timestamp) / 1000));
-    rows.push(['Reported', age < 90 ? `${age}s ago` : new Date(vehicle.timestamp).toLocaleTimeString()]);
+    const age = Math.max(
+      0,
+      Math.round((Date.now() - vehicle.timestamp) / 1000),
+    );
+    rows.push([
+      'Reported',
+      age < 90
+        ? `${age}s ago`
+        : new Date(vehicle.timestamp).toLocaleTimeString(),
+    ]);
   }
   if (vehicle?.tripId) rows.push(['Trip', String(vehicle.tripId)]);
   return rows;
@@ -161,7 +176,8 @@ export function createTranslinkTransitLayer() {
     const payload = await response.json();
     const routes = Array.isArray(payload?.routes) ? payload.routes : [];
     const stops = Array.isArray(payload?.stops) ? payload.stops : [];
-    if (!routes.length && !stops.length) throw new Error('Empty transit network');
+    if (!routes.length && !stops.length)
+      throw new Error('Empty transit network');
 
     _dataSource.entities.removeAll();
     _routeColors.clear();
@@ -242,7 +258,8 @@ export function createTranslinkTransitLayer() {
     _vehiclePoints.removeAll();
     _vehicleRecords.clear();
     for (const vehicle of vehicles) {
-      if (!Number.isFinite(vehicle.lat) || !Number.isFinite(vehicle.lon)) continue;
+      if (!Number.isFinite(vehicle.lat) || !Number.isFinite(vehicle.lon))
+        continue;
       const color = _routeColors.get(vehicle.routeId) || Cesium.Color.WHITE;
       const entityId = `translink-vehicle-${vehicle.id || `${vehicle.lat},${vehicle.lon}`}`;
       _vehicleRecords.set(entityId, vehicle);
@@ -303,15 +320,21 @@ export function createTranslinkTransitLayer() {
 
       // Claim our own entity ids so a sibling layer's click handler leaves
       // them alone, and vice versa — every layer here picks from one scene.
-      registerPickOwner('translink-transit', (id) => String(id).startsWith('translink-vehicle-'));
+      registerPickOwner('translink-transit', (id) =>
+        String(id).startsWith('translink-vehicle-'),
+      );
 
-      if (typeof Cesium.ScreenSpaceEventHandler === 'function' && viewer.scene?.canvas) {
+      if (
+        typeof Cesium.ScreenSpaceEventHandler === 'function' &&
+        viewer.scene?.canvas
+      ) {
         _clickHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
         _clickHandler.setInputAction((click) => {
           const picked = viewer.scene.pick(click.position);
           const pickedId = resolvePickId(picked);
           // Another layer owns this pick; do not compete for it.
-          if (pickedId && isOwnedByOtherLayer('translink-transit', pickedId)) return;
+          if (pickedId && isOwnedByOtherLayer('translink-transit', pickedId))
+            return;
           const record = pickedId ? _vehicleRecords.get(pickedId) : null;
           if (record) {
             _selectedId = pickedId;
@@ -360,7 +383,8 @@ export function createTranslinkTransitLayer() {
       if (!_dataSource || !_stopPoints || !_vehiclePoints) return false;
       try {
         const needsNetwork =
-          !_networkLoadedAt || Date.now() - _networkLoadedAt > NETWORK_REFRESH_MS;
+          !_networkLoadedAt ||
+          Date.now() - _networkLoadedAt > NETWORK_REFRESH_MS;
         if (needsNetwork) await loadNetwork();
         // A vehicle failure must not blank the network that already drew.
         try {

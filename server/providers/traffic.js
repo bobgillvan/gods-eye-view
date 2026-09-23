@@ -23,9 +23,16 @@ import {
  * Budget governor (mirrors the OpenSky credit-governor philosophy — last-good
  * data beats a dead layer): a persistent counter (.gev-cache/tomtom/budget.json,
  * keyed by UTC date, reset on day change) counts upstream fetch attempts
- * against a soft cap (TOMTOM_DAILY_TILE_BUDGET, default 40,000 of the free
- * tier's ~50k/day). Over the cap the proxy serves stale tiles when available,
- * else 429 {error:'budget'}.
+ * against a soft cap (TOMTOM_DAILY_TILE_BUDGET). Over the cap the proxy
+ * serves stale tiles when available, else 429 {error:'budget'}.
+ *
+ * The default is derived from TomTom's published free allowance, which is
+ * granted MONTHLY, not daily: 200,000 Traffic Flow & Incidents tile requests
+ * per month (https://docs.tomtom.com/pricing/). The previous 40,000/day
+ * default — and the "~50k/day" figure this comment used to cite — exhausted
+ * a month's entire allowance in five days, leaving the traffic layer dead
+ * for the rest of the billing period. 6,000/day keeps a full 31-day month
+ * inside the allowance (186,000) with headroom to spare.
  *
  * GET /api/tomtom/status → {hasKey, dailyCount, budget, date}. Keyless mode:
  * status reports hasKey:false and the tile endpoint 503s {error:'no_key'}
@@ -37,7 +44,8 @@ export function tomtomProxy() {
   const TILE_TTL_MS = 120_000;
   const CACHE_DIR = path.join(process.cwd(), '.gev-cache', 'tomtom');
   const BUDGET_PATH = path.join(CACHE_DIR, 'budget.json');
-  const DEFAULT_DAILY_BUDGET = 40000;
+  // 200,000/month free tier / 31 days = 6,451. Rounded down for headroom.
+  const DEFAULT_DAILY_BUDGET = 6000;
   const MEM_MAX_ENTRIES = 256;
   const UPSTREAM_TIMEOUT_MS = 15000;
 
@@ -144,121 +152,123 @@ export function tomtomProxy() {
     return buf;
   }
 
+  const installMiddleware = (server) => {
+    server.middlewares.use('/api/tomtom', async (req, res) => {
+      // Sanitized responses only (proxy/security baseline): no upstream
+      // error details, and never echo the key or the upstream URL.
+      const sendJson = (status, obj, extraHeaders = {}) => {
+        if (res.headersSent) return;
+        res.writeHead(status, {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store',
+          ...extraHeaders,
+        });
+        res.end(JSON.stringify(obj));
+      };
+      const sendTile = (buf, cacheStatus) => {
+        if (res.headersSent) return;
+        res.writeHead(200, {
+          'Content-Type': 'application/x-protobuf',
+          'Cache-Control': 'no-store',
+          'x-tomtom-cache': cacheStatus,
+        });
+        res.end(buf);
+      };
+
+      try {
+        await loadBudgetOnce();
+        const urlPath = String(req.url || '').split('?')[0];
+
+        if (urlPath === '/status') {
+          const hasKey = Boolean(process.env.TOMTOM_API_KEY);
+          const b = currentBudget();
+          sendJson(200, {
+            hasKey,
+            dailyCount: b.count,
+            budget: dailyBudgetLimit(),
+            date: b.date,
+          });
+          return;
+        }
+
+        const m = urlPath.match(/^\/flow\/(\d+)\/(\d+)\/(\d+)\.pbf$/);
+        if (!m) {
+          sendJson(404, { error: 'not_found' });
+          return;
+        }
+        const z = Number(m[1]);
+        const x = Number(m[2]);
+        const y = Number(m[3]);
+        if (!isValidTomTomTile(z, x, y)) {
+          sendJson(400, { error: 'invalid_tile' });
+          return;
+        }
+        if (!process.env.TOMTOM_API_KEY) {
+          sendJson(503, { error: 'no_key' });
+          return;
+        }
+
+        const key = `${z}/${x}/${y}`;
+        const now = Date.now();
+
+        let entry = mem.get(key);
+        if (!entry) {
+          entry = await readDiskTile(key);
+          if (entry) memSet(key, entry);
+        }
+        // Fresh cache hit — never counts against the budget.
+        if (entry && now - entry.at < TILE_TTL_MS) {
+          sendTile(entry.buf, 'HIT');
+          return;
+        }
+
+        // Budget governor: over the soft cap, last-good data beats a dead layer.
+        if (isTomTomOverBudget(currentBudget(), dailyBudgetLimit())) {
+          if (entry) {
+            sendTile(entry.buf, 'STALE-BUDGET');
+          } else {
+            sendJson(429, { error: 'budget' });
+          }
+          return;
+        }
+
+        // Stale or missing → refresh, single-flight per tile.
+        if (!inflight.has(key)) {
+          inflight.set(
+            key,
+            fetchUpstream(z, x, y)
+              .then(async (buf) => {
+                const fresh = { at: Date.now(), buf };
+                memSet(key, fresh);
+                await writeDiskTile(key, buf);
+                return fresh;
+              })
+              .catch((err) => {
+                console.warn(
+                  `[tomtom-proxy] ${key} fetch failed (${err?.message || err}) — serving stale if any`,
+                );
+                return null;
+              })
+              .finally(() => inflight.delete(key)),
+          );
+        }
+        const fresh = await inflight.get(key);
+        if (fresh) {
+          sendTile(fresh.buf, 'MISS');
+        } else if (entry) {
+          sendTile(entry.buf, 'STALE-ERROR'); // upstream down — stale beats empty
+        } else {
+          sendJson(502, { error: 'upstream' });
+        }
+      } catch (err) {
+        console.warn('[tomtom-proxy] error:', err?.message || err);
+        sendJson(500, { error: 'proxy' });
+      }
+    });
+  };
   return {
     name: 'tomtom-proxy',
-    configureServer(server) {
-      server.middlewares.use('/api/tomtom', async (req, res) => {
-        // Sanitized responses only (proxy/security baseline): no upstream
-        // error details, and never echo the key or the upstream URL.
-        const sendJson = (status, obj, extraHeaders = {}) => {
-          if (res.headersSent) return;
-          res.writeHead(status, {
-            'Content-Type': 'application/json',
-            'Cache-Control': 'no-store',
-            ...extraHeaders,
-          });
-          res.end(JSON.stringify(obj));
-        };
-        const sendTile = (buf, cacheStatus) => {
-          if (res.headersSent) return;
-          res.writeHead(200, {
-            'Content-Type': 'application/x-protobuf',
-            'Cache-Control': 'no-store',
-            'x-tomtom-cache': cacheStatus,
-          });
-          res.end(buf);
-        };
-
-        try {
-          await loadBudgetOnce();
-          const urlPath = String(req.url || '').split('?')[0];
-
-          if (urlPath === '/status') {
-            const hasKey = Boolean(process.env.TOMTOM_API_KEY);
-            const b = currentBudget();
-            sendJson(200, {
-              hasKey,
-              dailyCount: b.count,
-              budget: dailyBudgetLimit(),
-              date: b.date,
-            });
-            return;
-          }
-
-          const m = urlPath.match(/^\/flow\/(\d+)\/(\d+)\/(\d+)\.pbf$/);
-          if (!m) {
-            sendJson(404, { error: 'not_found' });
-            return;
-          }
-          const z = Number(m[1]);
-          const x = Number(m[2]);
-          const y = Number(m[3]);
-          if (!isValidTomTomTile(z, x, y)) {
-            sendJson(400, { error: 'invalid_tile' });
-            return;
-          }
-          if (!process.env.TOMTOM_API_KEY) {
-            sendJson(503, { error: 'no_key' });
-            return;
-          }
-
-          const key = `${z}/${x}/${y}`;
-          const now = Date.now();
-
-          let entry = mem.get(key);
-          if (!entry) {
-            entry = await readDiskTile(key);
-            if (entry) memSet(key, entry);
-          }
-          // Fresh cache hit — never counts against the budget.
-          if (entry && now - entry.at < TILE_TTL_MS) {
-            sendTile(entry.buf, 'HIT');
-            return;
-          }
-
-          // Budget governor: over the soft cap, last-good data beats a dead layer.
-          if (isTomTomOverBudget(currentBudget(), dailyBudgetLimit())) {
-            if (entry) {
-              sendTile(entry.buf, 'STALE-BUDGET');
-            } else {
-              sendJson(429, { error: 'budget' });
-            }
-            return;
-          }
-
-          // Stale or missing → refresh, single-flight per tile.
-          if (!inflight.has(key)) {
-            inflight.set(
-              key,
-              fetchUpstream(z, x, y)
-                .then(async (buf) => {
-                  const fresh = { at: Date.now(), buf };
-                  memSet(key, fresh);
-                  await writeDiskTile(key, buf);
-                  return fresh;
-                })
-                .catch((err) => {
-                  console.warn(
-                    `[tomtom-proxy] ${key} fetch failed (${err?.message || err}) — serving stale if any`,
-                  );
-                  return null;
-                })
-                .finally(() => inflight.delete(key)),
-            );
-          }
-          const fresh = await inflight.get(key);
-          if (fresh) {
-            sendTile(fresh.buf, 'MISS');
-          } else if (entry) {
-            sendTile(entry.buf, 'STALE-ERROR'); // upstream down — stale beats empty
-          } else {
-            sendJson(502, { error: 'upstream' });
-          }
-        } catch (err) {
-          console.warn('[tomtom-proxy] error:', err?.message || err);
-          sendJson(500, { error: 'proxy' });
-        }
-      });
-    },
+    configureServer: installMiddleware,
+    configurePreviewServer: installMiddleware,
   };
 }

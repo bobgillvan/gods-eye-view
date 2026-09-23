@@ -45,7 +45,10 @@ const CARD_STYLE = [
 export function escapeHtml(value) {
   return String(value ?? '').replace(
     /[&<>"']/g,
-    (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch],
+    (ch) =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[
+        ch
+      ],
   );
 }
 
@@ -99,7 +102,13 @@ function ensureCard() {
  * @param {Function} [options.onClose] Called when the card is dismissed.
  * @returns {HTMLElement|null}
  */
-export function showVehicleCard({ rows, shareText, accent = '#00e0ff', at, onClose }) {
+export function showVehicleCard({
+  rows,
+  shareText,
+  accent = '#00e0ff',
+  at,
+  onClose,
+}) {
   const card = ensureCard();
   if (!card) return null;
   _onClose = onClose || null;

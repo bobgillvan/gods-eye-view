@@ -47,7 +47,8 @@ export function flattenTrail(coordinates) {
 export function trailDescription(trail) {
   const parts = [trail?.trailClass, trail?.surface].filter(Boolean);
   const length = Number(trail?.lengthM);
-  if (Number.isFinite(length) && length > 0) parts.push(`${Math.round(length)} m`);
+  if (Number.isFinite(length) && length > 0)
+    parts.push(`${Math.round(length)} m`);
   return parts.join(' · ');
 }
 
@@ -113,7 +114,9 @@ export function createCoquitlamTrailsLayer() {
         for (const trail of trails) {
           const positions = flattenTrail(trail.coordinates);
           if (positions.length < 4) continue;
-          const color = Cesium.Color.fromCssColorString(trail.color || '#77bb88');
+          const color = Cesium.Color.fromCssColorString(
+            trail.color || '#77bb88',
+          );
           _dataSource.entities.add({
             id: trail.id,
             name: trail.name,
@@ -123,7 +126,10 @@ export function createCoquitlamTrailsLayer() {
               width: trail.width || 2,
               material: color.withAlpha(0.85),
               clampToGround: true,
-              distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, VISIBLE_M),
+              distanceDisplayCondition: new Cesium.DistanceDisplayCondition(
+                0,
+                VISIBLE_M,
+              ),
             },
             properties: {
               layerId: 'coquitlam-trails',
@@ -137,7 +143,9 @@ export function createCoquitlamTrailsLayer() {
         }
 
         _count = count;
-        _totalKm = Number.isFinite(payload?.totalLengthKm) ? payload.totalLengthKm : null;
+        _totalKm = Number.isFinite(payload?.totalLengthKm)
+          ? payload.totalLengthKm
+          : null;
         _loadedAt = Date.now();
         _lastUpdate = Date.now();
         _lastError = null;

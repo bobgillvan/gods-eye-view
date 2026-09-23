@@ -131,7 +131,11 @@ export function crimeWhereClause(months, now = new Date()) {
   // negative-offset zone — including this one. The symptom is a window that is
   // silently one day wide of the mark, which no amount of eyeballing catches.
   const from = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - months, now.getUTCDate()),
+    Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth() - months,
+      now.getUTCDate(),
+    ),
   );
   const iso = from.toISOString().slice(0, 10);
   return `Reported_Date >= TIMESTAMP '${iso} 00:00:00'`;
@@ -189,14 +193,18 @@ async function fetchAllFeatures(baseUrl, params, pageSize) {
     if (!response.ok) throw new Error(`ArcGIS HTTP ${response.status}`);
     const body = await response.json();
     if (body?.error) {
-      throw new Error(body.error.message || `ArcGIS error ${body.error.code || ''}`.trim());
+      throw new Error(
+        body.error.message || `ArcGIS error ${body.error.code || ''}`.trim(),
+      );
     }
     const batch = Array.isArray(body?.features) ? body.features : [];
     features.push(...batch);
     if (batch.length < pageSize) return features;
     offset += batch.length;
   }
-  console.warn(`[CoquitlamCivic] stopped paging at ${MAX_PAGES} pages (${features.length} features)`);
+  console.warn(
+    `[CoquitlamCivic] stopped paging at ${MAX_PAGES} pages (${features.length} features)`,
+  );
   return features;
 }
 
@@ -207,13 +215,15 @@ async function fetchAllFeatures(baseUrl, params, pageSize) {
  */
 async function loadTrails() {
   const now = Date.now();
-  if (_trailsCache && now - _trailsCachedAt < TRAILS_TTL_MS) return _trailsCache;
+  if (_trailsCache && now - _trailsCachedAt < TRAILS_TTL_MS)
+    return _trailsCache;
 
   const features = await fetchAllFeatures(
     TRAILS_LAYER,
     {
       where: '1=1',
-      outFields: 'OBJECTID,TRAIL_NAME,TRAIL_CLASS,GENERAL_TYPE,STATUS,SEGMENT_LENGTH',
+      outFields:
+        'OBJECTID,TRAIL_NAME,TRAIL_CLASS,GENERAL_TYPE,STATUS,SEGMENT_LENGTH',
       returnGeometry: 'true',
     },
     TRAILS_PAGE_SIZE,
@@ -234,7 +244,8 @@ async function loadTrails() {
     const style = trailStyle(props.TRAIL_CLASS);
     for (let i = 0; i < lines.length; i++) {
       const coords = (lines[i] || []).filter(
-        (p) => Array.isArray(p) && Number.isFinite(p[0]) && Number.isFinite(p[1]),
+        (p) =>
+          Array.isArray(p) && Number.isFinite(p[0]) && Number.isFinite(p[1]),
       );
       if (coords.length < 2) continue;
       trails.push({
@@ -261,7 +272,9 @@ async function loadTrails() {
   };
   _trailsCache = payload;
   _trailsCachedAt = Date.now();
-  console.log(`[CoquitlamCivic] trails: ${trails.length} segments, ${payload.totalLengthKm} km`);
+  console.log(
+    `[CoquitlamCivic] trails: ${trails.length} segments, ${payload.totalLengthKm} km`,
+  );
   return payload;
 }
 
@@ -292,7 +305,11 @@ async function loadCrime() {
   const byType = {};
   for (const f of features) {
     const coords = f?.geometry?.coordinates;
-    if (!Array.isArray(coords) || !Number.isFinite(coords[0]) || !Number.isFinite(coords[1])) {
+    if (
+      !Array.isArray(coords) ||
+      !Number.isFinite(coords[0]) ||
+      !Number.isFinite(coords[1])
+    ) {
       continue;
     }
     const props = f.properties || {};
@@ -335,30 +352,33 @@ async function loadCrime() {
  * @returns {import('vite').Plugin}
  */
 export function coquitlamCivicProxy() {
+  const installMiddleware = (server) => {
+    const route = (path, load, emptyShape) => {
+      server.middlewares.use(path, async (req, res) => {
+        const send = (code, body) => {
+          res.writeHead(code, {
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-store',
+          });
+          res.end(JSON.stringify(body));
+        };
+        if (req.method !== 'GET')
+          return send(405, { error: 'Method Not Allowed' });
+        try {
+          send(200, await load());
+        } catch (error) {
+          const message = String(error?.message || error);
+          console.warn(`[CoquitlamCivic] ${path} failed:`, message);
+          send(502, { error: message, ...emptyShape });
+        }
+      });
+    };
+    route('/api/coquitlam/trails', loadTrails, { trails: [] });
+    route('/api/coquitlam/crime', loadCrime, { incidents: [] });
+  };
   return {
     name: 'coquitlam-civic-proxy',
-    configureServer(server) {
-      const route = (path, load, emptyShape) => {
-        server.middlewares.use(path, async (req, res) => {
-          const send = (code, body) => {
-            res.writeHead(code, {
-              'Content-Type': 'application/json',
-              'Cache-Control': 'no-store',
-            });
-            res.end(JSON.stringify(body));
-          };
-          if (req.method !== 'GET') return send(405, { error: 'Method Not Allowed' });
-          try {
-            send(200, await load());
-          } catch (error) {
-            const message = String(error?.message || error);
-            console.warn(`[CoquitlamCivic] ${path} failed:`, message);
-            send(502, { error: message, ...emptyShape });
-          }
-        });
-      };
-      route('/api/coquitlam/trails', loadTrails, { trails: [] });
-      route('/api/coquitlam/crime', loadCrime, { incidents: [] });
-    },
+    configureServer: installMiddleware,
+    configurePreviewServer: installMiddleware,
   };
 }

@@ -185,7 +185,10 @@ export function simplifyLine(points, toleranceDeg) {
  * @param {number} [options.toleranceDeg] Simplification tolerance.
  * @returns {{routes: object[], stops: object[]}}
  */
-export function buildLocalNetwork({ routes, trips, shapes, stops }, { bbox, toleranceDeg = 0 }) {
+export function buildLocalNetwork(
+  { routes, trips, shapes, stops },
+  { bbox, toleranceDeg = 0 },
+) {
   const routeById = new Map();
   for (const r of routes || []) {
     if (r.route_id) routeById.set(r.route_id, r);
@@ -256,7 +259,9 @@ export function buildLocalNetwork({ routes, trips, shapes, stops }, { bbox, tole
     });
   }
   // Rail first so it paints over the bus mesh rather than under it.
-  outRoutes.sort((a, b) => a.priority - b.priority || a.routeId.localeCompare(b.routeId));
+  outRoutes.sort(
+    (a, b) => a.priority - b.priority || a.routeId.localeCompare(b.routeId),
+  );
 
   const outStops = [];
   for (const s of stops || []) {

@@ -110,16 +110,23 @@ export function createCoquitlamCrimeLayer() {
           return false;
         }
         const payload = await response.json();
-        const incidents = Array.isArray(payload?.incidents) ? payload.incidents : [];
-        const windowMonths = Number.isFinite(payload?.windowMonths) ? payload.windowMonths : null;
+        const incidents = Array.isArray(payload?.incidents)
+          ? payload.incidents
+          : [];
+        const windowMonths = Number.isFinite(payload?.windowMonths)
+          ? payload.windowMonths
+          : null;
 
         _dataSource.entities.removeAll();
         const now = Date.now();
         let count = 0;
         for (const incident of incidents) {
-          if (!Number.isFinite(incident.lat) || !Number.isFinite(incident.lon)) continue;
+          if (!Number.isFinite(incident.lat) || !Number.isFinite(incident.lon))
+            continue;
           const alpha = ageAlpha(incident.reportedAt, windowMonths, now);
-          const color = Cesium.Color.fromCssColorString(incident.color || '#8899aa');
+          const color = Cesium.Color.fromCssColorString(
+            incident.color || '#8899aa',
+          );
           _dataSource.entities.add({
             id: incident.id,
             name: incident.typeLabel || incident.type,
@@ -131,7 +138,10 @@ export function createCoquitlamCrimeLayer() {
               outlineColor: Cesium.Color.BLACK.withAlpha(0.5),
               outlineWidth: 1,
               heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-              distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, VISIBLE_M),
+              distanceDisplayCondition: new Cesium.DistanceDisplayCondition(
+                0,
+                VISIBLE_M,
+              ),
               scaleByDistance: new Cesium.NearFarScalar(1000, 1.0, 18000, 0.5),
             },
             properties: {
