@@ -1,4 +1,9 @@
 import * as Cesium from 'cesium';
+import {
+  clearOverlaySource,
+  setOverlayEntries,
+  setOverlaySourceVisible,
+} from '../overlays/worldOverlay.js';
 
 /**
  * Coquitlam Town Centre Park parking — live occupancy polygons.
@@ -18,6 +23,10 @@ import * as Cesium from 'cesium';
  */
 
 const API_URL = '/api/coquitlam-parking';
+/** World-overlay source that owns the lot labels. */
+export const PARKING_OVERLAY_SOURCE_ID = 'coquitlam-parking';
+/** Lots are ~100 m across; past this the labels would smear at globe zoom. */
+const LABEL_MAX_DISTANCE_M = 12000;
 /** The City's counters update continuously; the server caches at 60 s anyway. */
 const REFRESH_MS = 60 * 1000;
 
@@ -120,6 +129,7 @@ export function createCoquitlamParkingLayer() {
       _dataSource = new Cesium.CustomDataSource('coquitlam-parking');
       _dataSource.show = false;
       viewer.dataSources.add(_dataSource);
+      setOverlaySourceVisible(PARKING_OVERLAY_SOURCE_ID, false);
       _count = 0;
       _freeTotal = null;
       _lastUpdate = null;
@@ -131,11 +141,13 @@ export function createCoquitlamParkingLayer() {
     enable() {
       _enabled = true;
       if (_dataSource) _dataSource.show = true;
+      setOverlaySourceVisible(PARKING_OVERLAY_SOURCE_ID, true);
     },
 
     disable() {
       _enabled = false;
       if (_dataSource) _dataSource.show = false;
+      setOverlaySourceVisible(PARKING_OVERLAY_SOURCE_ID, false);
     },
 
     async update() {
@@ -154,6 +166,7 @@ export function createCoquitlamParkingLayer() {
         }
 
         _dataSource.entities.removeAll();
+        const labels = [];
         let count = 0;
         let freeTotal = 0;
         let anyLive = false;
@@ -195,36 +208,29 @@ export function createCoquitlamParkingLayer() {
             });
           });
 
-          // One label per lot, at the published centroid.
+          // One label per lot, at the published centroid, painted by the
+          // world-overlay host (Cesium text labels are not used for world text).
           if (Number.isFinite(lot.lat) && Number.isFinite(lot.lon)) {
-            _dataSource.entities.add({
+            // The 'label' variant paints only its title, so the free count
+            // joins it on one line ("Pinetree Lot E · 12 free").
+            const title = lotLabelText(lot).split('\n').join(' · ');
+            labels.push({
               id: `${lot.id}-label`,
               position: Cesium.Cartesian3.fromDegrees(lot.lon, lot.lat),
-              label: {
-                text: lotLabelText(lot),
-                font: '600 13px monospace',
-                fillColor: Cesium.Color.WHITE,
-                outlineColor: Cesium.Color.BLACK.withAlpha(0.85),
-                outlineWidth: 3,
-                style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-                verticalOrigin: Cesium.VerticalOrigin.CENTER,
-                horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
-                heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-                disableDepthTestDistance: Number.POSITIVE_INFINITY,
-                // Lots are ~100 m across; hide the text from orbit so the
-                // labels do not pile up into a smear at globe zoom.
-                distanceDisplayCondition: new Cesium.DistanceDisplayCondition(
-                  0,
-                  12000,
-                ),
-                scaleByDistance: new Cesium.NearFarScalar(500, 1.0, 9000, 0.55),
-              },
-              properties: { layerId: 'coquitlam-parking', lotName: lot.name },
+              variant: 'label',
+              title,
+              accent: style.css,
+              maxDistance: LABEL_MAX_DISTANCE_M,
             });
           }
           count++;
         }
 
+        setOverlayEntries(PARKING_OVERLAY_SOURCE_ID, labels, {
+          cohortLimit: Math.max(1, labels.length),
+          collisionCapacity: Math.max(1, labels.length),
+          moving: false,
+        });
         _count = count;
         _freeTotal = anyLive ? freeTotal : null;
         _lastUpdate = Date.now();
@@ -250,6 +256,7 @@ export function createCoquitlamParkingLayer() {
           /* viewer already torn down */
         }
       }
+      clearOverlaySource(PARKING_OVERLAY_SOURCE_ID);
       _dataSource = null;
       _enabled = false;
     },

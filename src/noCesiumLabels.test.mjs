@@ -8,9 +8,6 @@ import { parsers } from 'prettier/plugins/babel.mjs';
 const legacyFiles = new Set([
   'src/scenes/dataPacks/presentation.js',
   'src/layers/directions/index.js',
-  // Fork: lot labels predate upstream's world-overlay rule; port to the
-  // overlay host (see src/app/layers/overlayHost.js) and drop this entry.
-  'src/data/coquitlamParking.js',
 ]);
 const root = fileURLToPath(new URL('../', import.meta.url));
 const propertyName = (node) => node?.name ?? node?.value;
