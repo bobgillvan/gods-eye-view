@@ -656,7 +656,7 @@ test('the DISPLAY rail starts collapsed on a first run, and a stored choice wins
 
 // ── Voice: instruction-only, tool schema unchanged ─────────────────────
 
-test('the voice TOOL SCHEMA matches the pinned release — the mission mapping is instructions only', () => {
+test('the voice TOOL SCHEMA matches the pinned contract — the mission mapping is instructions only', () => {
   // Analyst layers and the separate satellite-pass tool deliberately extend the schema.
   // Re-pinned on merge with upstream: the four local layers (coquitlam-parking,
   // coquitlam-trails, coquitlam-crime, translink-transit) join the layerId enums
@@ -664,11 +664,27 @@ test('the voice TOOL SCHEMA matches the pinned release — the mission mapping i
   // Canonical serialization pins every tool name, description, property and
   // ordering while allowing source formatting. Derived from the unchanged
   // release schema before formatting (the previous source-byte pin passed).
-  const block = JSON.stringify(GEV_REALTIME_TOOLS);
-  assert.equal(block.length, 27678, 'serialized tool schema length drifted');
+  const legacyTools = structuredClone(GEV_REALTIME_TOOLS).filter((tool) => tool.name !== 'set_cyber_sonar');
+  const hudLayout = legacyTools.find((tool) => tool.name === 'set_hud').parameters.properties.layout;
+  assert.deepEqual(hudLayout.enum, ['tactical', 'operator', 'minimal', 'cyber']);
+  // Cyber deliberately adds one layout; first-run missions still change no tools.
+  hudLayout.enum = hudLayout.enum.filter((layout) => layout !== 'cyber');
+  const block = JSON.stringify(legacyTools);
+  // Re-derived for the voice layer manifest (generated layer enums, alias and
+  // field hints), point-and-ask's pointer/referent arguments and the prompt
+  // consolidation (shorter analyst, annotate_map and ISS wording), plus the
+  // referent-only track_entity alternative (kept out of the model-facing
+  // schema, which may not carry top-level anyOf), and Contacts requested-radius
+  // list descriptions; the missions still ride existing tools.
+  // Street Level adds toggle enum values and the generated alias hint.
+  // Fork: re-pinned for the four local layers (translink-transit,
+  // coquitlam-parking/-trails/-crime) in voice/layerManifest.js. Verified on
+  // the merge: with those four entries removed, upstream's pins (29802,
+  // b316ca2e…) reproduce exactly.
+  assert.equal(block.length, 30111, 'serialized tool schema length drifted');
   assert.equal(
     crypto.createHash('sha256').update(block).digest('hex'),
-    '6b34dab6796c775fe112cb043c351ed1447dd5136e8d0408ccb5528986e6f4e5',
+    '8435e53f9a5e73530683ff48f37645d36a4453af70004ed7002cc0f1681b8433',
     'the first-run missions must ride EXISTING tools: no schema edit, no cache bust',
   );
   const instructions = fs.readFileSync(new URL('../server/providers/openai/instructions.js', import.meta.url), 'utf8');
